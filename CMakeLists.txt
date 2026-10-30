@@ -274,6 +274,13 @@ else()
         hardware_vreg
         tinyusb_device
     )
+    # The Bluetooth keyboard, in the W builds (design.md §3.10): the radio
+    # starts only when /bluetooth/pairing.dat is on the card.
+    if (SHELL_W)
+        target_sources(shell PRIVATE src/port/cyw43_fw.c)
+        target_compile_definitions(shell PRIVATE PICO_SHELL_BT=1)
+        target_link_libraries(shell shell_btkbd cyw43_fw_stream)
+    endif()
     pico_enable_stdio_uart(shell ${PICO_SHELL_UART_ON})
     pico_enable_stdio_usb(shell 0)
     pico_add_extra_outputs(shell)

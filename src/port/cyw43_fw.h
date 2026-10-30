@@ -23,7 +23,8 @@ const char *cyw43_fw_open(void);
 void cyw43_fw_close(void);
 
 /* What the driver has asked of the file since it was opened: the reads,
- * and the offset of the last one that failed, -1 if none did. */
-void cyw43_fw_stats(unsigned *reads, long *failed_at);
+ * how many of them went to the card (the rest were in what it had read
+ * ahead), and the offset of the last one that failed, -1 if none did. */
+void cyw43_fw_stats(unsigned *reads, unsigned *fills, long *failed_at);
 
 #endif /* SHELL_CYW43_FW_H */

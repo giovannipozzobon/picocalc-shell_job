@@ -14,6 +14,12 @@
  * 5 ms. Returns the events read. */
 unsigned kbd_poll(void);
 
+/* Another source of key events, taken with the southbridge's at each
+ * kbd_poll(): a function that returns (state << 8) | code, or 0 when
+ * there is none (Bluetooth's btkbd_read(), design.md §3.10). NULL for
+ * none, which is how a program that has no such source leaves it. */
+void kbd_set_source(uint16_t (*read)(void));
+
 /* Take one event, if there is one. */
 bool kbd_pop(uint8_t *state, uint8_t *code);
 

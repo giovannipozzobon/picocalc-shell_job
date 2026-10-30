@@ -154,10 +154,10 @@ int main(void) {
     int mac_err = cyw43_wifi_get_mac(&cyw43_state, CYW43_ITF_STA, mac);
     uint32_t ms = (uint32_t)((time_us_64() - t0) / 1000u);
     cyw43_fw_close();
-    unsigned reads;
+    unsigned reads, fills;
     long failed;
-    cyw43_fw_stats(&reads, &failed);
-    say("  %u reads of the file", reads);
+    cyw43_fw_stats(&reads, &fills, &failed);
+    say("  %u reads of the file, %u from\n  the card", reads, fills);
     if (failed >= 0) say(", one failed at %ld", failed);
     say(".\n");
     bool up = mac_err == 0 && (mac[0] | mac[1] | mac[2] | mac[3] | mac[4] | mac[5]);

@@ -37,6 +37,11 @@
 #include "southbridge.h"
 #include "term.h"
 #include "usbdisk.h"
+#if PICO_SHELL_BT
+#include "btkbd.h"
+#include "btstore.h"
+#include "ff.h"
+#endif
 
 #define KBD_POLL_US 33333u   /* about 30 Hz (hardware-notes.md §6.1) */
 
@@ -62,12 +67,24 @@ static volatile uint64_t s_main_us, s_lcd_us, s_prompt_us;
 
 extern char __end__;   /* the linker's: the end of .bss, where the heap starts */
 
+#if PICO_SHELL_BT
+/* The Bluetooth keyboard (design.md §3.10): the radio runs in the
+ * background from bt_start() on, and its keys come into kbd.c's ring. Its
+ * poll saves a new pairing to the card, which must not happen while
+ * usbdisk has the card, so it stands aside then. */
+static bool s_bt_on;
+static bool s_bt_paused;
+#endif
+
 static void poll_keys(void) {
     uint64_t now = time_us_64();
     if (now < s_next_poll) return;
     s_next_poll = now + KBD_POLL_US;
     kbd_poll();
     card_poll();
+#if PICO_SHELL_BT
+    if (s_bt_on && !s_bt_paused) btkbd_poll();
+#endif
 }
 
 static void con_write(void *ctx, const char *buf, size_t n) {
@@ -111,7 +128,14 @@ static bool usb_stop(void *ctx) {
 
 /* usbdisk: until the computer ejects the card, or Break, Esc or Ctrl-C. */
 static const char *usbdisk(void *ctx) {
-    return usbdisk_run(usb_stop, ctx);
+#if PICO_SHELL_BT
+    s_bt_paused = true;
+#endif
+    const char *why = usbdisk_run(usb_stop, ctx);
+#if PICO_SHELL_BT
+    s_bt_paused = false;
+#endif
+    return why;
 }
 
 /* ---- the clock (design.md §3.8) ----------------------------------------- */
@@ -347,6 +371,31 @@ static void log_banner(bool clocks_ok, uint32_t i2c_hz, sb_status_t sb, const ui
 #endif
 }
 
+#if PICO_SHELL_BT
+/* Start the radio for the keyboard paired with btpair, after the prompt is
+ * up. Only with /bluetooth/pairing.dat on the card: a person who has
+ * paired a keyboard asked for it, and without one the radio is never
+ * touched (on a Pico 2, whose pins for it are the SMPS's and VBUS's). If
+ * it cannot start, the shell says so in a line and goes on. */
+static void bt_start(void) {
+    FILINFO fno;
+    if (f_stat(BT_STORE_PATH, &fno) != FR_OK) return;
+#if PICO_SHELL_UART
+    uint64_t t0 = time_us_64();
+#endif
+    if (btkbd_init()) {
+        s_bt_on = true;
+        kbd_set_source(btkbd_read);
+#if PICO_SHELL_UART
+        printf("bluetooth: started in %llu ms\n", (unsigned long long)((time_us_64() - t0) / 1000u));
+#endif
+        return;
+    }
+    shell_error(&g_shell, "\nbluetooth: %s\n", btkbd_status());
+    shell_prompt(&g_shell);
+}
+#endif
+
 int main(void) {
     s_main_us = time_us_64();
 
@@ -388,6 +437,9 @@ int main(void) {
                      (unsigned long)(SRAM_END - SRAM_BASE), (unsigned long)g_board.psram_bytes);
     shell_start(&g_shell);
     s_prompt_us = time_us_64();
+#if PICO_SHELL_BT
+    bt_start();
+#endif
 
     for (;;) shell_input(&g_shell, getkey(NULL));
 }

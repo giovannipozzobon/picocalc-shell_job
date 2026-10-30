@@ -1299,6 +1299,59 @@ board not yet):*
   bank, not here (§7). *Not measured:* the heap over a long session, a
   reconnection after the keyboard sleeps, and BLE.
 
+*As built, M14 step 4 (2026-10-30; link maps and the host's tests; on
+the board not yet):*
+
+- **When the radio starts.** After the first prompt is up
+  (`shell_start()` has returned), and only if `/bluetooth/pairing.dat` is
+  on the card: a person who paired a keyboard asked for it, and with no
+  pairing the radio is never touched, which is also what keeps a Pico 2
+  with the W build out of the SMPS and VBUS pins. If a startup file runs a
+  program (`web`, say), the shell is left before the radio starts and
+  none is wasted on it. The prompt is not held up; typing meanwhile is
+  kept by the southbridge's FIFO (31 keys), and the start takes the card
+  for about a second (the firmware).
+- **If it cannot start** (no firmware file, a file that is another
+  build's, a radio that does not answer) the shell says one line,
+  `bluetooth: <why>`, from `btkbd_status()`, takes a new prompt and goes
+  on: the owner's decision, 2026-10-30.
+- **The keys** come through `kbd_set_source()` in `src/port/kbd.c`: at
+  each `kbd_poll()` (30 Hz), after the southbridge's, `btkbd_read()` is
+  drained into the same ring, so `keys.c`, vi, EDIT, `more`, the line
+  editor and Break/Esc see one keyboard. Programs that do not call it
+  (`ntp.uf2`, `web.uf2`, `exit-test`) have no Bluetooth keyboard: the
+  radio is gone when they start (the reboot), and the shell starts it
+  again when it comes back.
+- **`btkbd_poll()`**, which saves a new pairing to the card, runs from the
+  same poll, and stands aside while `usbdisk` has the card. The radio is
+  not stopped then: whether its interrupts cost `usbdisk` speed is for the
+  board to say, and `usbdisk` is where a stop would go.
+- **The firmware is read ahead** in 4 KB pieces (`cyw43_fw.c`), where
+  step 2's 3,613 reads of 64 bytes each went to FatFs: the same hook,
+  fewer trips to the card. It cost 4 KB of RAM.
+- **The shell's RAM, as built** (link maps, development builds): UNIX W
+  494,932 B, 29,356 free; DOS W 484,228 B, 40,060 free; the release build
+  491,992 B, 32,296 free. The 7,248 B of BTstack's heap (step 3) fit in
+  that; the pipes, `ls` and argument buffers are not cut.
+- **Checked on the board by the owner, 2026-10-30** (a Pico 2 W, the
+  development build, UNIX flavour):
+  - the keyboard types at the prompt, and the shell starts with the line
+    `bluetooth: <why>` when the firmware file is missing, the PicoCalc's
+    own keyboard working all the while;
+  - after `reboot` the Bluetooth keyboard is usable about 1 s after the
+    prompt, and about 2-3 s after coming back from `web`;
+  - **`usbdisk` with the radio on**, 8 MB each way to a Mac with
+    `tools/usb-rate.py`: written 660 KB/s with Bluetooth, 663 without;
+    **read 497 KB/s with, 612 without**, a fifth slower. The write is not
+    touched; the read, which is limited by the processor, is. Both read
+    back byte for byte;
+  - `-Os` in the shell: nothing noticeably slower (by eye; the panel's
+    and the card's code is still `-O3`).
+- **Not yet checked:** vi with the Bluetooth keyboard, a keyboard that
+  sleeps and reconnects, BLE, and the shell with no pairing not starting
+  the radio (it can only be seen on the board, by the radio's LED
+  staying dark, or in the development build's log).
+
 **Safety on a Pico 2.** The W build would start the radio at every
 power-on, and on a Pico 2 the same pins (GP23-25, GP29) are the SMPS,
 VBUS and LED. The radio is started only when `/bluetooth/pairing.dat`
