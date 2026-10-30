@@ -141,13 +141,13 @@ int main(void) {
           "info, no port: '%s'", con);
     CHECK(run("phosphor") == 0 && strcmp(con, "default\n") == 0, "phosphor: '%s'", con);
 
-    const shell_system_t sys = { battery, backlight, phosphor, info, power, NULL };
+    const shell_system_t sys = { battery, backlight, phosphor, info, power, NULL, NULL };
     shell_set_system(&sh, &sys);
 
     /* ---- man ---- */
     CHECK(run("man") == 0, "man");
-    CHECK(strncmp(con, "backlight  battery    bootsel\nbreak      cat", 40) == 0, "columns: '%.60s'", con);
-    CHECK(strstr(con, "\n`man name` for one.") && strstr(con, "wc\n") && strstr(con, "tail"),
+    CHECK(strncmp(con, "backlight  battery    bt\nbootsel    break      cat", 44) == 0, "columns: '%.60s'", con);
+    CHECK(strstr(con, "\n`man name` for one.") && strstr(con, "wc") && strstr(con, "web") && strstr(con, "tail"),
           "man: '%s'", con);
     for (unsigned i = 0; shell_builtin_at(i); i++) {
         char line[32];

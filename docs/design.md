@@ -1,6 +1,6 @@
 # PicoCalc Shell — design
 
-Status: **Draft 14, 2026-10-30.** M13 (§3.9) is proposed, not built. Feasibility study and first design. M0
+Status: **Draft 14, 2026-10-30.** M13 (§3.9, steps 1-3) and M14 (§3.10) are done ([milestones.md](milestones.md)). Feasibility study and first design. M0
 (the skeleton), M1 (files), M2 (run), M3 (vi), M4 (comfort), M6 (USB
 speed), M8 (the rest of v1), M9 (the DOS flavour) and M11 (menus) are done
 ([milestones.md](milestones.md)). There is no M5: *Exit to shell* in the
@@ -1324,8 +1324,10 @@ the board not yet):*
   again when it comes back.
 - **`btkbd_poll()`**, which saves a new pairing to the card, runs from the
   same poll, and stands aside while `usbdisk` has the card. The radio is
-  not stopped then: whether its interrupts cost `usbdisk` speed is for the
-  board to say, and `usbdisk` is where a stop would go.
+  not stopped then: the board says its interrupts cost `usbdisk` a fifth of
+  its read speed (below), and *the owner decided, 2026-10-30, to leave it
+  so*: the radio stays on, and a stop (BTstack taken down and up again
+  with no reboot, never tried) is not built.
 - **The firmware is read ahead** in 4 KB pieces (`cyw43_fw.c`), where
   step 2's 3,613 reads of 64 bytes each went to FatFs: the same hook,
   fewer trips to the card. It cost 4 KB of RAM.
@@ -1351,6 +1353,16 @@ the board not yet):*
   sleeps and reconnects, BLE, and the shell with no pairing not starting
   the radio (it can only be seen on the board, by the radio's LED
   staying dark, or in the development build's log).
+
+*As built, M14 step 6 (2026-10-30):* `bt` (`BT`), a builtin of the W
+builds, says what the radio is doing, from a new hook in `shell_system_t`
+(`bluetooth`, NULL in the Pico 2 build, where `bt` is not a builtin):
+`connected: <name>`, `waiting for <name>`, `no keyboard paired`, or why it
+is off (`off: no pairing on the card`, `off: no firmware file on the
+card`, ...). `info` has the same line, cut to fit 40 columns. There is
+nothing to switch: the pairing is `btpair`'s and the radio starts with the
+shell. Both guides, `THIRD-PARTY.md` and `milestones.md` are written.
+Host tests: `bt` in both flavours in `test_ntp`.
 
 **Safety on a Pico 2.** The W build would start the radio at every
 power-on, and on a Pico 2 the same pins (GP23-25, GP29) are the SMPS,
@@ -2937,11 +2949,15 @@ in [milestones.md](milestones.md).
   2. *Built 2026-10-30, on the board not yet:* room: the firmware from the card (`cyw43_ll.c`'s patch, `cyw43-fw.bin`
      and its tool), `-Os` and vi at 32 KB in the W builds (BLE stays, the
      owner, 2026-10-30), until the link has the room §3.10 measured.
-  3. `src/core/btstore.c` (the pairing file's format, through FatFs) with
-     host tests, and `src/port/btkbd.c` adapted from picocalc-extras.
-  4. The radio's start (only with a pairing on the card), the events into
-     `kbd.c`'s ring, off during `usbdisk` and before a program.
-  5. On the board, with the owner's keyboard: typing at the prompt and in
+  3. *Built 2026-10-30, and checked on the board:* `src/core/btstore.c` (the
+     pairing file's format, through FatFs) with host tests, and
+     `src/port/btkbd.c` adapted from picocalc-extras.
+  4. *Built 2026-10-30, and checked on the board:* the radio's start (only
+     with a pairing on the card), the events into `kbd.c`'s ring; left on
+     in `usbdisk` (the owner).
+  5. *Partly done 2026-10-30 (BLE, vi, a sleeping keyboard and a Pico 2 are
+     left):* on the board, with the owner's keyboard: typing at the prompt and in
      vi, back from a program, `usbdisk` and the panel with the radio on,
      battery, and a Pico 2.
-  6. The `bt` builtin, `info`, the guides, `THIRD-PARTY.md`, milestones.md.
+  6. *Built 2026-10-30:* the `bt` builtin, `info`, the guides,
+     `THIRD-PARTY.md`, milestones.md.

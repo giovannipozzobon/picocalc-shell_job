@@ -16,6 +16,92 @@ Each entry gives:
 - a **not checked** list, carried forward until something checks each item
   or a decision drops it.
 
+## M14 — A Bluetooth keyboard (2026-10-30, branch `m14-bluetooth`)
+
+**Done 2026-10-30 for a classic keyboard in the W builds** (design.md
+§3.10). A keyboard paired with picocalc-extras' `btpair` types in the
+shell next to the PicoCalc's own, at the prompt and in everything that
+reads keys. The radio starts after the first prompt when
+`/bluetooth/pairing.dat` is on the card; its firmware is read from
+`/bluetooth/cyw43-fw.bin`, not held in RAM; `bt` and `info` say what it is
+doing.
+
+**Checked on the host.** `test_btstore` (the pairing file's records,
+format byte for byte, the older file, files that are not it, the card
+failing at each of 40 points of a save, no card), `test_vi_compact` and
+`test_edit_compact` (the W builds' 32 KB buffers, which found a 65536 written
+into a test), and `bt` in both flavours in `test_ntp` / `test_ntp_dos`. 33
+tests in all.
+
+**Checked on the board, by the owner,** on a Pico 2 W, the development
+build, UNIX flavour, with a card set aside:
+
+- *Step 2*, `cyw43fw-test.uf2`: the radio comes up with the firmware read
+  from the card (3,613 reads of 64 bytes, 906 ms); the first run, which
+  closed the file after `cyw43_arch_init()`, never brought the chip up,
+  because the driver loads the firmware at the first thing done to it.
+- *Step 3*, `btkbd-test.uf2`: radio up in 1,027 ms; the paired keyboard
+  connects and its keys come through; BTstack's `malloc` is 3,256 B once
+  started and 7,248 B connected, not growing with the keys.
+- *Step 4*, the shell: the keyboard types at the prompt; with the
+  firmware file missing, the line `bluetooth: <why>` and the PicoCalc's
+  keyboard going on; the keyboard usable about 1 s after the prompt after
+  `reboot`, 2-3 s after coming back from `web`; `-Os` not noticeably slower.
+- `usbdisk`, 8 MB each way to a Mac (`tools/usb-rate.py`): with the radio
+  on, 660 KB/s written and 497 read; without, 663 and 612; both read back
+  byte for byte. *The owner decided to leave the radio on in `usbdisk`.*
+
+**Measurements** (link maps, development builds; estimates replaced): the
+probe of step 1 put Bluetooth at 879 KB in the W shell; as built, the
+firmware read from the card, `-Os` (the panel's and card's drivers stay at
+`-O3`) and vi at 32 KB give the UNIX W shell 495,424 B, 28,864 free; DOS
+W 484,728 B, 39,560 free; the release build 492,484 B, 31,804 free
+(against 524,288). The Pico 2 build is 454,416 B, as before.
+
+**The owner chose:** Bluetooth in the existing W builds, not a third;
+BLE kept in the build; the firmware from the card; vi at 32 KB in the W
+builds; the BTstack licence no obstacle; the radio left on in `usbdisk`;
+a failed start to say one line and go on.
+
+**Not checked.** BLE keyboards and mice in the shell; vi with the
+Bluetooth keyboard; a keyboard that sleeps and reconnects, and for how
+long it stays connected; the shell with no pairing not starting the radio
+(only seen from the log, not the board); a Pico 2 with a W build and a
+`pairing.dat` (the pins of GP23-25 and GP29); the battery's cost with
+the radio on; the DOS flavour on the board; the release build; a keyboard
+paired by a `btpair` other than the owner's.
+
+## M13 — A web file manager, steps 1-3 (2026-10-30, branch `m13-web`)
+
+**Steps 1-3 done 2026-10-30; step 4, installing a program from the page,
+is on hold at the owner's request** (design.md §3.9). `web.uf2`, a RAM
+program run by the W builds' `web` (`WEB`), joins the network
+`/ntp/ntp.cfg` names and serves the card to a browser at its address and
+at `picocalc.local`: list, upload, download, rename, move, delete and make
+folders, with PicoMultiLoader's page and API.
+
+**Checked on the host.** `test_web` (requests, UTF-8 and CP437 names, JSON,
+times, the card's operations over FAT16 and FAT32, a card failing during an
+upload) and `test_httpd` (the HTTP connection driven as a browser would,
+in pieces of 1 byte to 100 KB, uploads of 0 to 100,000 bytes, a card that
+fails, a long listing), and `web` in `test_ntp`. Mutations to the file-send
+failure, the upload's undo and the listing's separator were seen to fail.
+
+**Checked on the board, by the owner,** on a Pico 2 W: the server joined
+the network, and from a browser listing, upload, download, rename, make
+folder and delete worked. Not recorded: the speeds, a file of several MB,
+a second client.
+
+**Measurements.** `web.uf2` 502,832 B of RAM (95.9%) in the development
+build, 493,184 B in the release build, from the link map (before step 2's
+`-Os`, which has since made it 458,036 B).
+
+**Not checked.** Install from the page (not built); speed up and down
+against `usbdisk`'s; a file of several MB compared byte for byte; a
+dropped connection leaving nothing behind (done on the host only);
+`picocalc.local` from a phone; several connections at once; the DOS
+flavour's `WEB` on the board.
+
 ## M7 — Shell at power-on (2026-10-25, branch `m7-boot-shell`)
 
 **Done 2026-10-25.** UF2 Loader 2.5's stage3 with a patch: power-on

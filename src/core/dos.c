@@ -268,6 +268,9 @@ const shell_builtin_t flavour_builtins[] = {
     { "ATTRIB",    dos_attrib,    "ATTRIB [+R|-R] [+A|-A] [+S|-S] [+H|-H] [path]", "Displays or changes attributes" },
     { "BACKLIGHT", dos_backlight, "BACKLIGHT [lcd|kbd] [0-255]", "Displays or sets the backlights" },
     { "BATTERY",   cmd_battery,   "BATTERY", "Displays the battery's charge" },
+#if SHELL_NTP
+    { "BT",        cmd_bt,        "BT", "Shows the Bluetooth keyboard's state" },
+#endif
     { "BOOTSEL",   cmd_bootsel,   "BOOTSEL", "Reboot into bootloader mode (BOOTSEL)" },
     { "CALL",      dos_call,      "CALL file [parameters]", "Starts a batch file and returns" },
     { "CD",        dos_cd,        "CD [path]", "Displays or changes the directory" },

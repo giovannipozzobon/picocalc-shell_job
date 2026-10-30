@@ -61,6 +61,9 @@ typedef struct {
      * not return if it worked; otherwise why not. */
     const char *(*power)(void *ctx, shell_power_t what);
     void *ctx;
+    /* A line saying what Bluetooth is doing, for `bt` and `info`
+     * (design.md §3.10); NULL where there is none: the Pico 2 build. */
+    const char *(*bluetooth)(void *ctx);
 } shell_system_t;
 
 /* The port's clock (clock.h; design.md §3.8): UTC in milliseconds since

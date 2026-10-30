@@ -173,6 +173,7 @@ int cmd_info(shell_t *sh, int argc, char **argv) {
     const out_t *o = &sh->out;
     out_printf(o, "shell     %s\n", sh->version);
     if (sh->sys.info) sh->sys.info(sh->sys.ctx, o);
+    if (sh->sys.bluetooth) out_printf(o, "bluetooth %.29s\n", sh->sys.bluetooth(sh->sys.ctx));
     char card[48];
     FRESULT r = files_card(card, sizeof card);
     out_printf(o, "card      %s\n", r == FR_OK ? card : files_why(r));
@@ -266,6 +267,21 @@ int cmd_web(shell_t *sh, int argc, char **argv) {
     return run_ram_program(sh, name);
 }
 #endif
+
+/* ---- bt --------------------------------------------------------------- */
+
+/* What the Bluetooth keyboard is doing: paired and connected, waiting
+ * for it, or why the radio is not on (design.md §3.10). The pairing is
+ * btpair's, and the radio starts with the shell, so there is nothing to
+ * switch here. */
+int cmd_bt(shell_t *sh, int argc, char **argv) {
+    (void)argv;
+    const char *name = SHELL_DOS ? "BT" : "bt";
+    if (argc != 1) return usage(sh, name);
+    if (!sh->sys.bluetooth) return not_here(sh, name);
+    out_printf(&sh->out, "%s\n", sh->sys.bluetooth(sh->sys.ctx));
+    return 0;
+}
 
 /* ---- date ------------------------------------------------------------- */
 

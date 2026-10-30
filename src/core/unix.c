@@ -116,6 +116,9 @@ static int cmd_sh(shell_t *sh, int argc, char **argv) {
 const shell_builtin_t flavour_builtins[] = {
     { "backlight",  cmd_backlight,  "backlight [lcd|kbd] [0-255]", "Shows or sets a backlight" },
     { "battery",    cmd_battery,    "battery", "Displays the battery's charge" },
+#if SHELL_NTP
+    { "bt",         cmd_bt,         "bt", "Shows the Bluetooth keyboard's state" },
+#endif
     { "bootsel",    cmd_bootsel,    "bootsel", "Reboot into bootloader mode (BOOTSEL)" },
     { "break",      cmd_break,      "break [N]", "Leaves a select, or N of them" },
     { "cat",        cmd_cat,        "cat file... (or cat < file)", "Concatenate and print files" },

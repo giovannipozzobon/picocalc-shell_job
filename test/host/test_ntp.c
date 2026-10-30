@@ -358,6 +358,43 @@ static int test_web(void) {
     return 0;
 }
 
+/* `bt` (design.md §3.10): what the Bluetooth keyboard is doing. */
+static const char *bt_line = "connected: K380";
+
+static const char *fake_bluetooth(void *ctx) {
+    (void)ctx;
+    return bt_line;
+}
+
+static int test_bt(void) {
+    const char *bt = SHELL_DOS ? "BT" : "bt";
+    char want[96];
+
+    /* No Bluetooth in the port, as in the Pico 2 build. */
+    CHECK(run(bt) == 1 && strstr(con, "not on this machine"), "no Bluetooth: '%s'", con);
+
+    shell_system_t sys = { 0 };
+    sys.bluetooth = fake_bluetooth;
+    shell_set_system(&sh, &sys);
+    CHECK(run(bt) == 0 && strcmp(con, "connected: K380\n") == 0 && boots == 0, "connected: '%s'", con);
+    bt_line = "off: no firmware file on the card";
+    CHECK(run(bt) == 0 && strcmp(con, "off: no firmware file on the card\n") == 0, "off: '%s'", con);
+
+    /* `info` has it too, cut to fit 40 columns with its name. */
+    CHECK(run(SHELL_DOS ? "INFO" : "info") == 0, "info");
+    snprintf(want, sizeof want, "bluetooth %.29s\n", bt_line);
+    CHECK(strstr(con, want), "info line: '%s'", con);
+    char *nl = strstr(strstr(con, "bluetooth "), "\n");
+    CHECK(nl && (size_t)(nl - strstr(con, "bluetooth ")) <= 39, "fits 40 columns");
+
+    snprintf(want, sizeof want, "usage: %s\n", bt);
+    CHECK(run(SHELL_DOS ? "BT x" : "bt x") == 1 && strcmp(con, want) == 0, "usage: '%s'", con);
+    CHECK(run(SHELL_DOS ? "HELP BT" : "man bt") == 0 && strstr(con, "Bluetooth"), "help: '%s'", con);
+    memset(&sys, 0, sizeof sys);
+    shell_set_system(&sh, &sys);
+    return 0;
+}
+
 int main(void) {
     if (test_parse()) return 1;
     CHECK(host_disk_create(NULL, 32u << 20, false), "image");
@@ -367,5 +404,6 @@ int main(void) {
     shell_init(&sh, &out, &hooks, "test");
     if (test_builtin()) return 1;
     if (test_web()) return 1;
+    if (test_bt()) return 1;
     TEST_DONE();
 }

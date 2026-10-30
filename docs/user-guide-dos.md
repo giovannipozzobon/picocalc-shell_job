@@ -248,6 +248,7 @@ copy is always byte for byte), so `COPY NAME+,,` is the same.
 | `TIME [/T \| time]` | the same for the time: `TIME 14:30`, `TIME 2:30p`, `TIME 9:05:30` |
 | `NTP [/F]` | in the Pico 2 W build: sets the clock from the network, once each power-on; `/F` tries again |
 | `WEB` | in the Pico 2 W build: manages the card from a browser, over Wi-Fi, until Esc |
+| `BT` | in the Pico 2 W build: what the Bluetooth keyboard is doing |
 
 `PHOSPHOR` lasts until the shell is left. Put it in `AUTOEXEC.BAT` to
 have it every time.
@@ -366,6 +367,35 @@ timeout  = 20                   # seconds to join and get the time, 5 to 60
 | `The network was not joined.` | no network by that name in range |
 | `No address from the network.` | joined, but DHCP did not answer in time |
 | `No radio.` | a Pico 2 W build on a Pico 2 |
+
+`BT`:
+
+- A Bluetooth keyboard works at the prompt, in EDIT and in everything that
+  reads keys, alongside the PicoCalc's own keyboard, in the Pico 2 W build.
+  Classic Bluetooth keyboards, and Bluetooth Low Energy ones (btpair marks
+  them `(BLE)`), are supported; the Low Energy ones have not been tried
+  in the shell yet.
+- It is **paired with `btpair`**, the program of
+  [picocalc-extras](https://github.com/ctorkildson-netizen/picocalc-extras/tree/main/bluetooth),
+  not here: copy `BTPAIR.UF2` to `C:\PICO2-APPS\`, run it, and follow it. It
+  keeps the pairing in `C:\BLUETOOTH\PAIRING.DAT`, which the shell reads.
+- The radio's firmware is a file the shell reads from the card, so that it
+  does not take the shell's memory: copy `CYW43-FW.BIN` (made with the
+  shell: the one of the same build) to `C:\BLUETOOTH\`.
+- With **both files on the card**, the shell starts the radio right after
+  the first prompt, in about a second, and the keyboard connects when you
+  press a key on it (or within a few seconds if it is awake). With no
+  `PAIRING.DAT` the radio is never started. If it cannot be, the shell says
+  `bluetooth: why` in one line and carries on with the PicoCalc's keyboard.
+- `BT` says what it is doing: `connected: K380`, `waiting for K380`, `no
+  keyboard paired`, or why it is off, such as `off: no firmware file on
+  the card`. `INFO` has the same line.
+- A program (`WEB`, an emulator) runs without it: the radio goes with the
+  shell, and starts again, with the keyboard connecting again, when the
+  program returns.
+- The radio takes some of the processor's time: `USBDISK` reads about a
+  fifth slower with it on (writing is as fast). On a Pico 2 there is no
+  radio and no `BT`.
 
 `BATTERY`:
 

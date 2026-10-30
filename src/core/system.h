@@ -28,6 +28,8 @@ int cmd_bootsel(shell_t *sh, int argc, char **argv);
 int cmd_date(shell_t *sh, int argc, char **argv);
 /* Only in the W build (ntp.h). */
 int cmd_ntp(shell_t *sh, int argc, char **argv);
+/* The W build's Bluetooth keyboard, what it is doing (design.md §3.10). */
+int cmd_bt(shell_t *sh, int argc, char **argv);
 /* Only in the W build too (httpd.h, design.md §3.9). */
 int cmd_web(shell_t *sh, int argc, char **argv);
 

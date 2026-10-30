@@ -74,6 +74,7 @@ extern char __end__;   /* the linker's: the end of .bss, where the heap starts *
  * usbdisk has the card, so it stands aside then. */
 static bool s_bt_on;
 static bool s_bt_paused;
+static char s_bt_why[48] = "off: no pairing on the card";   /* why the radio is not on */
 #endif
 
 static void poll_keys(void) {
@@ -204,6 +205,23 @@ static void phosphor(void *ctx, uint16_t rgb565) {
     (void)ctx;
     term_set_phosphor(&g_term, rgb565);
 }
+
+#if PICO_SHELL_BT
+/* What Bluetooth is doing, for `bt` and `info`. */
+static const char *bluetooth(void *ctx) {
+    (void)ctx;
+    static char line[48];
+    if (!s_bt_on) return s_bt_why;
+    const char *name = btkbd_name();
+    switch (btkbd_state()) {
+    case BTKBD_CONNECTED: snprintf(line, sizeof line, "connected: %s", name); break;
+    case BTKBD_WAITING:   snprintf(line, sizeof line, "waiting for %s", name); break;
+    case BTKBD_IDLE:      snprintf(line, sizeof line, "no keyboard paired"); break;
+    default:              snprintf(line, sizeof line, "%s", btkbd_status()); break;
+    }
+    return line;
+}
+#endif
 
 static void info(void *ctx, const out_t *o) {
     (void)ctx;
@@ -391,6 +409,7 @@ static void bt_start(void) {
 #endif
         return;
     }
+    snprintf(s_bt_why, sizeof s_bt_why, "off: %s", btkbd_status());
     shell_error(&g_shell, "\nbluetooth: %s\n", btkbd_status());
     shell_prompt(&g_shell);
 }
@@ -428,7 +447,11 @@ int main(void) {
     const shell_hooks_t hooks = { now_us, interrupted, getkey, pollkey, usbdisk, NULL };
     shell_init(&g_shell, &out, &hooks, SHELL_VERSION);
     shell_set_loader(&g_shell, &g_loader);
-    const shell_system_t sys = { battery, backlight, phosphor, info, power, NULL };
+#if PICO_SHELL_BT
+    const shell_system_t sys = { battery, backlight, phosphor, info, power, NULL, bluetooth };
+#else
+    const shell_system_t sys = { battery, backlight, phosphor, info, power, NULL, NULL };
+#endif
     shell_set_system(&g_shell, &sys);
     const shell_clock_t clock = { clock_get, clock_set, NULL, clock_note, clock_ntp, clock_ntp_keep,
                                   clock_offset };

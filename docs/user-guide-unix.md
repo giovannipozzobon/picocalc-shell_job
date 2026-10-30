@@ -448,6 +448,7 @@ have it every time.
 | `date [-u] mmddHHMM[[cc]yy]` | sets the date and time: month, day, hour, minute and the year, which may be left off. `-u` takes it as UTC |
 | `ntp [-f]` | in the Pico 2 W build: sets the clock from the network, once each power-on; `-f` tries again |
 | `web` | in the Pico 2 W build: manages the card from a browser, over Wi-Fi, until Esc |
+| `bt` | in the Pico 2 W build: what the Bluetooth keyboard is doing |
 
 `date`:
 
@@ -552,6 +553,35 @@ timeout  = 20                   # seconds to join and get the time, 5 to 60
 | `The network was not joined.` | no network by that name in range |
 | `No address from the network.` | joined, but DHCP did not answer in time |
 | `No radio.` | a Pico 2 W build on a Pico 2 |
+
+`bt`:
+
+- A Bluetooth keyboard works at the prompt, in vi and in everything that
+  reads keys, alongside the PicoCalc's own keyboard, in the Pico 2 W build.
+  Classic Bluetooth keyboards, and Bluetooth Low Energy ones (btpair marks
+  them `(BLE)`), are supported; the Low Energy ones have not been tried
+  in the shell yet.
+- It is **paired with `btpair`**, the program of
+  [picocalc-extras](https://github.com/ctorkildson-netizen/picocalc-extras/tree/main/bluetooth),
+  not here: copy `btpair.uf2` to `/pico2-apps/`, run it, and follow it. It
+  keeps the pairing in `/bluetooth/pairing.dat`, which the shell reads.
+- The radio's firmware is a file the shell reads from the card, so that it
+  does not take the shell's memory: copy `cyw43-fw.bin` (made with the
+  shell: the one of the same build) to `/bluetooth/`.
+- With **both files on the card**, the shell starts the radio right after
+  the first prompt, in about a second, and the keyboard connects when you
+  press a key on it (or within a few seconds if it is awake). With no
+  `pairing.dat` the radio is never started. If it cannot be, the shell says
+  `bluetooth: why` in one line and carries on with the PicoCalc's keyboard.
+- `bt` says what it is doing: `connected: K380`, `waiting for K380`, `no
+  keyboard paired`, or why it is off, such as `off: no firmware file on
+  the card`. `info` has the same line.
+- A program (`web`, an emulator) runs without it: the radio goes with the
+  shell, and starts again, with the keyboard connecting again, when the
+  program returns.
+- The radio takes some of the processor's time: `usbdisk` reads about a
+  fifth slower with it on (writing is as fast). On a Pico 2 there is no
+  radio and no `bt`.
 
 `battery`:
 
@@ -746,6 +776,8 @@ failed save leaves the old file as it was.
 /pico2-apps/ntp.uf2   the Pico 2 W build's ntp
 /ntp/ntp.cfg          ntp's settings, and the network web joins
 /pico2-apps/web.uf2   the Pico 2 W build's web
+/bluetooth/pairing.dat  the paired Bluetooth keyboard (btpair's)
+/bluetooth/cyw43-fw.bin  the radio's firmware, read at its start
 /etc/profile          run each time the shell starts
 /home/                where the shell starts ($HOME)
 /.shell/              the shell's history, and large pipes while they run
