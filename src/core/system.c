@@ -219,7 +219,7 @@ int cmd_bootsel(shell_t *sh, int argc, char **argv) {
 
 bool system_leaves(shell_cmd_fn fn) {
     return fn == cmd_poweroff || fn == cmd_reboot || fn == cmd_bootsel ||
-           (SHELL_NTP && fn == cmd_ntp);
+           (SHELL_NTP && (fn == cmd_ntp || fn == cmd_web));
 }
 
 #if SHELL_NTP
@@ -250,6 +250,20 @@ int cmd_ntp(shell_t *sh, int argc, char **argv) {
     /* Back without rebooting: ntp.uf2 did not run, so NTP was not tried. */
     if (status != 0) clock_ntp_keep(was);
     return status;
+}
+
+/* ---- web -------------------------------------------------------------- */
+
+/* web.uf2, the card on the network (design.md §3.9): the W build's, as
+ * `ntp` is, and unlike it every time it is typed: a person asked for it,
+ * and it ends when the person says so, with Esc. The W build is the one
+ * whose port has NTP. */
+int cmd_web(shell_t *sh, int argc, char **argv) {
+    (void)argv;
+    const char *name = SHELL_DOS ? "WEB" : "web";
+    if (argc != 1) return usage(sh, name);
+    if (!clock_has_ntp()) return not_here(sh, name);
+    return run_ram_program(sh, name);
 }
 #endif
 

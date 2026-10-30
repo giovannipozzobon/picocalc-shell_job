@@ -22,6 +22,19 @@ The same licence as this project, and the same owner.
 | `test/host/test_util.h` | the same | the include guard |
 | `tools/build.sh`, `uart-log.sh`, `uart-type.sh`, `uart-screen.sh` | `tools/` | names, keys and pacing |
 
+## PicoMultiLoader — GPL-3.0, the owner's
+
+The same licence as this project, and the same owner (who confirmed on
+2026-10-30 that the code may be taken). The web file manager (design.md
+§3.9) follows its `rp2xxx/src/webserver.c` and keeps its page and API.
+
+| Here | From PicoMultiLoader | Changes |
+|---|---|---|
+| `src/web/index.html` | `common/web/index.html` | the Wi-Fi settings and, until M13 step 4, the Flash button taken out; the title and the card's type |
+| `src/web/embed.cmake` | `rp2xxx/embed.cmake` | the header's names; no flash resource area |
+| `src/web/lwipopts.h` | `rp2xxx/src/lwipopts.h` | no DNS client, no raw API; smaller pools |
+| `src/core/httpd.c`, `web.c` | `rp2xxx/src/webserver.c` | the routes and the upload's way of working, rewritten with no lwIP in them, in CP437 and UTF-8, and through `name.new` |
+
 ## picocalc-text-starter — MIT, the owner's
 
 <https://github.com/BlairLeduc/picocalc-text-starter>, Copyright (c) 2025

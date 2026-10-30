@@ -247,6 +247,7 @@ copy is always byte for byte), so `COPY NAME+,,` is the same.
 | `DATE [/T \| date]` | shows the date and asks for a new one; Enter keeps it. `DATE 10-22-26` sets it, `DATE /T` only shows it |
 | `TIME [/T \| time]` | the same for the time: `TIME 14:30`, `TIME 2:30p`, `TIME 9:05:30` |
 | `NTP [/F]` | in the Pico 2 W build: sets the clock from the network, once each power-on; `/F` tries again |
+| `WEB` | in the Pico 2 W build: manages the card from a browser, over Wi-Fi, until Esc |
 
 `PHOSPHOR` lasts until the shell is left. Put it in `AUTOEXEC.BAT` to
 have it every time.
@@ -332,6 +333,39 @@ timeout  = 20                   # seconds to join and get the time, 5 to 60
 | `no time from the server` | the server did not answer in time |
 | `stopped` | Esc, Break or Ctrl-C |
 | `ntp.uf2 did not finish` | the program was cut off: power, or a reset |
+
+
+`WEB`:
+
+- `WEB` manages the card from a browser on the same network: list
+  folders, upload (drag files onto the page, or paste them), download,
+  rename, move, delete and make folders. It runs the program `WEB.UF2`,
+  found as `NTP.UF2` is, which joins the network, shows its address on the
+  screen and answers a browser there, and at `http://picocalc.local/`. Without it, `WEB` says `Bad command or file name`.
+- It joins the network `C:\NTP\NTP.CFG` names (the file `NTP` reads; only `ssid`,
+  `password`, `country` and `timeout` matter to it), written with EDIT.
+  It joins as a client of the network: it makes no network of its own.
+- **There is no password.** While it runs, anyone on the network can read
+  and change everything on the card. Use it on a network you trust.
+- Esc, Break or Ctrl-C on the PicoCalc stops it and comes back to the
+  shell.
+- A file is written to `name.new` first and put in place when it is whole,
+  so a transfer that breaks off leaves the old file as it was. Names are
+  shown as UTF-8; a name from the browser that the card's character set
+  (CP437) cannot spell is refused.
+- Installing a program from the page is not there yet.
+- It is the Pico 2 W build's; with `WEB` on a Pico 2 you get
+  `WEB: not on this machine`.
+
+| `WEB.UF2` says | Means |
+|---|---|
+| `The card cannot be read.` | no card, or one that is not FAT |
+| `Line N: ...` | a mistake in `C:\NTP\NTP.CFG`; each key once |
+| `It names no network.` | no `ssid` in the file |
+| `The password was refused.` | check `password` |
+| `The network was not joined.` | no network by that name in range |
+| `No address from the network.` | joined, but DHCP did not answer in time |
+| `No radio.` | a Pico 2 W build on a Pico 2 |
 
 `BATTERY`:
 

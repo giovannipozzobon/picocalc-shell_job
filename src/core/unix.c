@@ -155,6 +155,9 @@ const shell_builtin_t flavour_builtins[] = {
     { "vi",         cmd_vi,         "vi [-R] file", "Edits a text file" },
     { "view",       cmd_view,       "view file", "Reads a text file in vi" },
     { "wc",         cmd_wc,         "wc [-l] [-w] [-c] [file...]", "Counts lines, words and bytes" },
+#if SHELL_NTP
+    { "web",        cmd_web,        "web", "Manages the SD Card from a browser" },
+#endif
 };
 
 const unsigned flavour_nbuiltins = sizeof flavour_builtins / sizeof flavour_builtins[0];

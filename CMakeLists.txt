@@ -18,9 +18,11 @@ set(SHELL_CORE_SOURCES
     src/core/bininfo.c
     src/core/clock.c
     src/core/editor_file.c
+    src/core/fat.c
     src/core/editor_pattern.c
     src/core/files.c
     src/core/history.c
+    src/core/httpd.c
     src/core/input.c
     src/core/keys.c
     src/core/line.c
@@ -35,6 +37,7 @@ set(SHELL_CORE_SOURCES
     src/core/text.c
     src/core/uf2.c
     src/core/vars.c
+    src/core/web.c
 )
 # ...the UNIX flavour's command language, vi and font...
 set(SHELL_UNIX_SOURCES
@@ -429,6 +432,63 @@ else()
         pico_enable_stdio_usb(ntp 0)
         pico_add_extra_outputs(ntp)
         target_link_options(ntp PRIVATE -Wl,--print-memory-usage)
+
+        # web.uf2: the card on the network, from a browser, in a RAM
+        # program of its own, which the shell's `web` runs (design.md
+        # §3.9). The same rules as ntp.uf2: it links the CYW43 driver
+        # under the owner's section 7 permission, so nothing from UF2
+        # Loader or another GPL-3.0 author.
+        # The page, gzipped into a header (src/web/embed.cmake).
+        add_custom_command(
+            OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/web/web_page.h
+            COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/web
+            COMMAND ${CMAKE_COMMAND} -DIN=${CMAKE_CURRENT_SOURCE_DIR}/src/web/index.html
+                    -DOUT=${CMAKE_CURRENT_BINARY_DIR}/web/web_page.h
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/src/web/embed.cmake
+            DEPENDS src/web/index.html src/web/embed.cmake
+            COMMENT "Embedding the web page"
+        )
+        add_executable(web
+            src/web/main.c
+            ${CMAKE_CURRENT_BINARY_DIR}/web/web_page.h
+            src/port/clock.c
+            src/port/diskio.c
+            src/port/ds3231.c
+            src/port/kbd.c
+            src/port/lcd.c
+            src/port/screen.c
+            src/port/sd.c
+            src/port/southbridge.c
+        )
+        pico_set_binary_type(web no_flash)
+        pico_set_program_name(web "web")
+        pico_set_program_description(web "A web file manager for the PicoCalc's card")
+        target_include_directories(web PRIVATE src/web src/port include ${CMAKE_CURRENT_BINARY_DIR}/web)
+        target_compile_options(web PRIVATE ${SHELL_WARNINGS})
+        target_compile_definitions(web PRIVATE
+            PICO_SHELL_UART=${PICO_SHELL_UART_ON}
+            PICO_SHELL_LCD_SPI_HZ=${PICO_SHELL_LCD_SPI_HZ}
+            PICO_CLOCK_ADJUST_PERI_CLOCK_WITH_SYS_CLOCK=1
+            PICO_DEFAULT_UART=0
+            PICO_DEFAULT_UART_TX_PIN=2
+            PICO_DEFAULT_UART_RX_PIN=3
+            CYW43_HOST_NAME="picocalc"
+        )
+        target_link_libraries(web
+            shell_core
+            pico_stdlib
+            pico_rand
+            pico_cyw43_arch_lwip_poll
+            pico_lwip_mdns
+            hardware_dma
+            hardware_i2c
+            hardware_powman
+            hardware_spi
+        )
+        pico_enable_stdio_uart(web ${PICO_SHELL_UART_ON})
+        pico_enable_stdio_usb(web 0)
+        pico_add_extra_outputs(web)
+        target_link_options(web PRIVATE -Wl,--print-memory-usage)
     endif()
 
     # Memory use on every build (design.md §7, EL §2.1).

@@ -15,24 +15,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "fat.h"
 #include "shell.h"
 
 /* $HOME's default: cd with no operand, and the starting directory when
  * the card has it (design.md §4.3). */
 #define SHELL_HOME "/home"
-
-/* Register the volume; FatFs mounts it on first use, and again after
- * the port's disk layer reports the card changed. */
-void files_mount(void);
-
-/* Let the volume go, for usbdisk: nothing may be open. */
-void files_unmount(void);
-
-/* FatFs's result in words: "no card", "no such file or directory". */
-const char *files_why(FRESULT r);
-
-/* f_stat, with the root, which FatFs cannot stat, as a directory. */
-FRESULT files_stat(const char *path, FILINFO *fno);
 
 /* Whether ls and globs leave the name out: `.name`, macOS's `._name`
  * (hardware-notes.md §7.1), and anything FAT marks hidden or system,
@@ -41,25 +29,6 @@ bool files_hidden(const FILINFO *fno);
 
 /* Whether `path` (absolute) is a directory on the card. */
 bool files_is_dir(const char *path);
-
-/* A write through name.new (EL §8.6), for any command that saves a file. */
-typedef struct {
-    FIL         fil;
-    const char *why;                        /* the first failure, or NULL */
-    char        path[SHELL_PATH_MAX + 1];
-    char        tmp[SHELL_PATH_MAX + 5];    /* path + ".new" */
-} files_safe_t;
-
-/* Open `path`.new for writing: NULL, or why not. A directory or a file
- * marked read-only is refused. */
-const char *files_safe_open(files_safe_t *w, const char *path);
-/* Write to it; the first failure is kept in w->why and later writes do
- * nothing. */
-void files_safe_write(files_safe_t *w, const void *buf, size_t n);
-/* Close and remove name.new, leaving the old file. */
-void files_safe_abort(files_safe_t *w);
-/* Close name.new and put it in place: NULL, or why the old file stays. */
-const char *files_safe_commit(files_safe_t *w);
 
 /* Open a file the shell reads at startup (/etc/profile, the history):
  * if it is missing but name.new is there, the power went between the
@@ -88,9 +57,6 @@ FRESULT files_open_read(shell_t *sh, const char *cmd, const char *arg, FIL *f);
  * index of the first operand, or -1 after printing the usage. */
 int files_options(shell_t *sh, int argc, char **argv, const char *allowed, unsigned *flags,
                   const char *usage);
-
-/* The volume's type, size and free space, as df, info and DIR show them. */
-FRESULT files_space(const char **type, uint64_t *total, uint64_t *avail);
 
 /* Make `path` (absolute, a directory) the current directory, each name
  * spelled as the card has it: NULL, or why not. */

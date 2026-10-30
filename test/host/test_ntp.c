@@ -329,6 +329,35 @@ static int test_builtin(void) {
     return 0;
 }
 
+/* `web` (design.md §3.9): web.uf2, run each time it is typed. */
+static int test_web(void) {
+    const char *web = SHELL_DOS ? "WEB" : "web";
+    char want[64];
+
+    /* No web.uf2: said, and nothing booted. */
+    CHECK(run(web) == 127 && boots == 0, "no web.uf2: '%s'", con);
+    CHECK(strcmp(con, SHELL_DOS ? "Bad command or file name\n" : "web: not found\n") == 0, "said: '%s'", con);
+
+    CHECK(f_mkdir("/pico2-apps") == FR_EXIST || f_stat("/pico2-apps", &(FILINFO){ 0 }) == FR_OK, "dir");
+    CHECK(put_ram_uf2("/pico2-apps/web.uf2"), "web.uf2");
+    record_ntp = -1;
+    CHECK(run(web) == 0 && boots == 1 && strcmp(boot_ram, "/PICO2-~1/WEB.UF2") == 0, "runs: %d '%s' '%s'",
+          boots, boot_ram, con);
+    CHECK(record_ntp == NTP_SET || record_ntp == -1, "the NTP record is left alone");
+    /* Every time: there is no once-per-power-on rule, a person typed it. */
+    CHECK(run(web) == 0 && boots == 1, "again: %d", boots);
+
+    /* Its mistakes. */
+    snprintf(want, sizeof want, "usage: %s\n", web);
+    CHECK(run(SHELL_DOS ? "WEB x" : "web x") == 1 && boots == 0 && strcmp(con, want) == 0, "usage: '%s'", con);
+    if (!SHELL_DOS)
+        CHECK(run("web > /out") == 1 && boots == 0 && strcmp(con, "web: not with a redirection or a pipe\n") == 0,
+              "redirected: '%s'", con);
+    CHECK(run(SHELL_DOS ? "HELP WEB" : "man web") == 0 && strstr(con, "browser"), "help: '%s'", con);
+    CHECK(f_unlink("/pico2-apps/web.uf2") == FR_OK, "removed");
+    return 0;
+}
+
 int main(void) {
     if (test_parse()) return 1;
     CHECK(host_disk_create(NULL, 32u << 20, false), "image");
@@ -337,5 +366,6 @@ int main(void) {
     const shell_hooks_t hooks = { now_us, interrupted, NULL, NULL, NULL, NULL };
     shell_init(&sh, &out, &hooks, "test");
     if (test_builtin()) return 1;
+    if (test_web()) return 1;
     TEST_DONE();
 }

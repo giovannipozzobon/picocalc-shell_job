@@ -315,6 +315,9 @@ const shell_builtin_t flavour_builtins[] = {
     { "USBDISK",   cmd_usbdisk,   "USBDISK", "Exposes the SD Card to a computer" },
     { "VER",       dos_ver,       "VER", "Displays the shell's version" },
     { "VOL",       dos_vol,       "VOL", "Displays information about the SD Card" },
+#if SHELL_NTP
+    { "WEB",       cmd_web,       "WEB", "Manages the SD Card from a browser" },
+#endif
     { "XCOPY",     dos_xcopy,     "XCOPY source [destination] [/S]", "Copies files and directories" },
 };
 

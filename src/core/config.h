@@ -59,6 +59,16 @@
 #define SHELL_COMPLETE_NAMES 2048u
 #define SHELL_COMPLETE_MAX   128u
 
+/* web.uf2 (web.h): a request's target, "/api/x?query", as read, and one
+ * entry of a listing as JSON. A name on the card is up to 255 bytes of
+ * CP437, which is up to 765 in UTF-8; FAT names hold no `"`, `\` or
+ * control character, so JSON adds nothing to them. */
+#define WEB_TARGET_MAX     600u
+#define WEB_ENTRY_MAX      1024u
+/* One connection's output buffer (httpd.h): a response's header and the
+ * next piece of a file or listing. */
+#define HTTPD_OUT_MAX      4096u
+
 /* A time zone's name in TZ, such as EST or <+0530> (clock.h); a longer
  * one is cut. */
 #define SHELL_ZONE_MAX     15u

@@ -1,6 +1,6 @@
 # PicoCalc Shell — design
 
-Status: **Draft 13, 2026-10-22.** Feasibility study and first design. M0
+Status: **Draft 14, 2026-10-30.** M13 (§3.9) is proposed, not built. Feasibility study and first design. M0
 (the skeleton), M1 (files), M2 (run), M3 (vi), M4 (comfort), M6 (USB
 speed), M8 (the rest of v1), M9 (the DOS flavour) and M11 (menus) are done
 ([milestones.md](milestones.md)). There is no M5: *Exit to shell* in the
@@ -47,6 +47,7 @@ only open questions are M10's, a flash filesystem for programs to share
 | 2026-10-18 | Scripts and batch files can show menus (M11). The UNIX flavour has bash's `select NAME in WORDS; do LIST; done`, with `break`, `PS3` and `REPLY`, as its one compound command: no `if` or `case`, so a menu branches by running the word chosen. The DOS flavour has DOS 6's `CHOICE` with all its switches (`/C`, `/N`, `/S`, `/T`), for `IF ERRORLEVEL` and `GOTO`. | 4.4, 4.7, 10 |
 | 2026-10-25 | The shell does not load RAM UF2s itself or keep itself resident across one; stage3 loads them, after a reboot. M7's patched stage3 skips its 0.5 s wait for a key when a command is waiting, which takes most of the time out of each trip to a program and back. | 10 |
 | 2026-10-25 | Under M7, only a power-on gives the shell with no command; a program's `watchdog_reboot()` with no command restarts it, as under the stock loader. A restart loop is broken by holding Up/F1/F5 through the restart, which stage3 watches for after draining the FIFO, or by a power cycle. The commands in the watchdog's scratch registers stay stock 2.5's, so the shell and programs run the same under either loader (the owner). A RAM program restarts itself with `BOOT_RAM` and its own 8.3 path; its loop is broken only by a power cycle, since a command skips the watch for a key. | 10 |
+| 2026-10-30 | M13, a web file manager (§3.9): a RAM program, `web.uf2`, run by the W build's `web` builtin, as `ntp.uf2` is; it is a client of the network `/ntp/ntp.cfg` names, with no access point and no authentication for now; a file for the network alone may replace `ntp.cfg`'s later; its page is in English; its code and API come from PicoMultiLoader (the owner's, GPL-3.0). | 3.9, 10 |
 | 2026-10-25 | M7's patched stage3 is built once for each size of flash, 4, 8 and 16 MB, each the Pico 2's board with only the flash size changed, since its partition table is fixed when it is built (the owner). | 10 |
 
 References: **HW §N** is [hardware-notes.md](hardware-notes.md). **EL §N** is
@@ -937,6 +938,189 @@ above, or fills in what it left open):
   show them, and nothing with the clock not set.
 - `MEM` still shows its numbers without separators, so `COUNTRY` does
   not reach it.
+
+### 3.9 A web file manager (M13)
+
+*Proposed 2026-10-30, with the answers of the owner (the same day) in the
+table above.* From a computer or a phone on the same network, a browser
+manages the card: browse, upload, download, rename, delete, make folders,
+and install a program. It follows what `ntp.uf2` does (§3.8), for the same
+reason: the CYW43's firmware does not fit in the shell.
+
+**A RAM program, `web.uf2`, in `/pico2-apps/`.** The W build's `web`
+builtin (`WEB` in the DOS flavour) runs it as any program (§3.3), and it
+comes back to the shell as `ntp.uf2` does, with `BOOT_SD` written
+by itself (§3.4). The Pico 2 build has no `web`; a word `web` is looked up
+as any other. `web.uf2` links the CYW43 driver under the same GPL-3.0 §7
+permission as `ntp.uf2` (§9), so it links nothing from UF2 Loader or
+another GPL-3.0 author (`loader.c`, `core/uf2.c`, `usbdisk.c`). It is
+built for `pico2_w` only.
+
+**Wi-Fi: a client of an existing network, and no access point**
+(*the owner, 2026-10-30*). It reads the network from `/ntp/ntp.cfg`,
+with `ntp_config_parse()`, so one file has the one network (`ssid`,
+`password`, `country`, `timeout`; `server` is ignored here).
+*The owner, 2026-10-30:* a file for the network alone, as Linux keeps one,
+may replace this later; the program reads the network through one
+function, so that change touches one place. Once joined, the page is at
+the address DHCP gave (shown on the panel) and at `picocalc.local` (mDNS,
+as PicoMultiLoader does). There is no DHCP server and no access point.
+
+**No authentication** (*the owner, 2026-10-30*, for now): anyone on the
+network can read and change the card. The panel says so while the server
+runs, and `web` stops with Esc, Break or Ctrl-C.
+
+**The API** is PicoMultiLoader's (its `webserver.c` and `index.html`,
+the owner's code, GPL-3.0), so the page and the API are not new:
+
+| Request | Does |
+|---|---|
+| `GET /` | the page, in English, embedded in the program |
+| `GET /api/list?path=/dir` | `{"path","entries":[{"n","d","s","t"}]}` |
+| `GET /api/info` | card size and free space, the network |
+| `GET /api/file?path=/f[&dl=1]` | download, or show |
+| `POST /api/upload?path=/f[&mtime=unix]` | the body becomes the file |
+| `POST /api/mkdir?path=/d` | make a folder |
+| `POST /api/delete?path=/f` | a file, or a folder and all in it |
+| `POST /api/rename?from=/a&to=/b` | rename or move |
+| `POST /api/flash?path=/f.uf2` | install a program (below) |
+
+PicoMultiLoader's `POST /api/wifi` is left out: the network is the file's.
+
+**Installing.** `web.uf2` may not flash, since that is `loader.c`'s and
+`uf2.c`'s work (above). `POST /api/flash` checks only that the file is
+there and ends in `.uf2`, writes its path to `/web/install`, and returns
+to the shell as above. The shell, when it starts, reads `/web/install` if
+it exists, **deletes it first**, and runs the program as the `run` of §3.3
+does, which makes the family and extent check, so a bad UF2 is refused
+there and a power cut leaves no loop. A UF2 that is refused shows why on
+the shell's screen.
+
+**Safe by the shell's rules.** An upload goes to `name.new`, then unlink,
+then rename (EL §8.6), and is unlinked if the connection drops, so
+nothing half written is left; a UF2 uploaded into `/pico2-apps/` is
+installed only by the user's own `/api/flash`. Names are checked as the
+shell checks them (§4.2): no `..`, no name FAT cannot hold. Every wait on
+the card stays under the southbridge's 2.5 s watchdog (HW §3), so a
+large transfer reads and writes the card in small pieces, between polls
+of lwIP.
+
+**The core and the port.** What can be tested on the host is in
+`src/core/web.c`: reading a request line and the query, URL decoding, path
+and name checks, JSON text, Unix to FAT times, and the upload's
+`name.new` steps over FatFs. The lwIP TCP code, the page, mDNS and the
+panel are in `src/web/` (the port, as `src/ntp/` is).
+
+*Estimates until measured (EL §14.4):* lwIP with TCP and DHCP, and the
+HTTP code, 30–40 KB; the page, 15–20 KB; four connections with a 4 KB
+buffer each and one file, 25 KB. That is about 80 KB beyond `ntp.uf2`'s
+400 KB against the 504 KB of SRAM, which must be checked first with a
+build, as `ntp.uf2`'s was. If it does not fit, the buffers shrink before
+the number of connections does.
+
+*Measured, M13 step 1 (2026-10-30; the link map of the `pico2_w`
+development build, not yet run on a board):* the stub of `src/web/main.c`
+(it reads `ntp.cfg`, joins, answers every request with a fixed page, and
+announces `picocalc.local`) takes 448,640 B of RAM, 85.6% of the 512 KB
+region, against `ntp.uf2`'s 398,368 B: 50 KB more, with lwIP's TCP pools
+(four connections' worth of buffers, 14 KB of heap), DHCP and mDNS. That
+leaves about 75 KB for the API, the page and the upload buffers, so the
+estimate above is not exceeded so far and the plan stands.
+
+**To check on the board** (the facts found go in hardware-notes.md):
+transfer speed up and down against `usbdisk`'s 610 and 700 KB/s (HW §8);
+that a file of several MB, uploaded and downloaded, compares byte for
+byte; that a dropped connection leaves nothing behind; that `picocalc.local`
+resolves from a Mac and from a phone; and that a UF2 installed from the
+page runs and the shell comes back.
+
+*As built, M13 step 2 (2026-10-30; `src/core/web.c`, `web.h` and the
+host's `test_web`, over FAT16 and FAT32):*
+
+- **Names are converted.** The card's names are CP437 (`ffconf.h`) and a
+  browser's are UTF-8, so `web.c` converts every name both ways with
+  FatFs's own tables (`ff_oem2uni`, `ff_uni2oem`). A name from the page
+  that CP437 cannot spell is refused, and a malformed UTF-8 sequence or an
+  overlong one with it. This was not in the design above: PicoMultiLoader
+  sent the bytes as they were, which makes an invalid JSON string for any
+  name with an accent.
+- **A path from the page** must start with `/`, and is refused if it has
+  `..` (not followed), a control character, or any of `\ : * ? " < > |`.
+  `.` and repeated `/` are taken out.
+- **Times** go through the local offset in minutes from the clock's
+  record (the one the shell left, `aon_offset`), not through `TZ`, which
+  `web.uf2` does not have; a change of daylight saving while the server
+  runs is not followed. A time not in 1980-2099 is left as FatFs's now.
+- **`GET /api/info`** gives `{"type","total","free"}` and leaves the
+  network to the port, which knows it.
+- **A listing leaves out** an entry whose name cannot be shown (does not
+  fit its buffer), as `ls` leaves out a name too long for a path.
+- **Delete** removes what it can under a tree (a read-only or hidden
+  file too), and reports the first failure.
+- **Tested:** each parsing function with its bad inputs; uploads of 0 to
+  70,000 bytes in pieces of 1,460 and 4,096; the time kept; a read-only
+  file, a directory and a missing folder as targets; an upload dropped
+  half way; the card failing at 18 points through a 60,000-byte upload
+  (the old file stays whole, or the new one is whole, never half, and no
+  `.new`); a full card; no card; rename onto a file, into itself (also
+  in another case) and of the root; a delete of a tree with read-only and
+  hidden files. Two mutations (the time's offset and the rename into
+  itself) were seen to fail the tests.
+- **Not yet tested:** a power cut between the unlink and the rename of an
+  upload (it leaves `name.new` whole, as for the shell's own writes, and
+  `files_open_startup` is the shell's only reader of it); a card changed
+  during a listing.
+
+*As built, M13 step 3 (2026-10-30; `src/core/httpd.c`, `src/web/main.c`,
+`src/web/index.html`, the `web` builtin, and the host's `test_httpd` and
+`test_ntp`'s `web`):*
+
+- **The protocol is in the core.** `httpd.c` is one HTTP connection, with
+  no lwIP in it: bytes in with `httpd_feed()`, bytes out with
+  `httpd_peek()` and `httpd_advance()`, so the host tests drive it as a
+  browser does, in pieces of 1 byte to 100 KB, over FAT16 and FAT32. The
+  port (`src/web/main.c`) only moves bytes between it and lwIP's raw TCP,
+  in a pool of three connections.
+- **The request is read a line at a time**, keeping only the request
+  line and `Content-Length`, so a header of any size (a browser's
+  cookies) is passed over; a request line over 600 bytes is refused.
+  A request with `Transfer-Encoding` is refused (501) and an upload with
+  no `Content-Length` too (411). Every response ends with the
+  connection, with `Connection: close`.
+- **An upload that fails is answered when its body has been read**, so
+  the browser sees the answer and not a reset. A connection that drops
+  undoes the upload (`httpd_close`). A file or listing that breaks off
+  in the middle aborts the socket (`httpd_failed`), so a short file is
+  not taken for a whole one.
+- **Files are shown, not run.** A file's type is by its extension; text
+  and anything that could run in the page (`.html`) is sent as
+  `text/plain`, with `nosniff`. A download's name goes in
+  `Content-Disposition` as RFC 5987; one too long for it is sent as
+  `download`.
+- **`web.uf2` links `fat.c`, not `files.c`.** `files.c`'s commands pull
+  the rest of the shell in with them (the first link was 825 KB). The
+  functions that need only FatFs (`files_mount`, `files_why`,
+  `files_stat`, `files_space` and the `name.new` writes) moved to `fat.c`
+  and `fat.h`, which `files.h` includes, so nothing else changed;
+  `web_delete` has a stack of its own and does not use `files_walk`.
+- **The page** is PicoMultiLoader's, in English, gzipped into a header
+  at build time (`src/web/embed.cmake`), without its Wi-Fi settings and,
+  until step 4, its Flash button. The page shows the card's type from
+  `GET /api/info`.
+- **The `web` builtin** (`WEB`, W build only: it is the build whose port
+  has NTP) runs `web.uf2` as any program is found, every time it is
+  typed: there is no once-per-power-on rule, since a person asked for it
+  and Esc ends it. It takes no argument and no redirection. A `web` in
+  `/etc/profile` would run again each time the shell comes back, as any
+  program would.
+- **Measured** (the link map of the development build, not yet run on a
+  board; 2026-10-30): `web.uf2` takes 502,832 B of RAM, 95.9% of the 512
+  KB (21 KB free), and the release build 493,184 B, 94.1%. The step 1
+  stub was 448,536 B; the three connections (7 KB each), the page (11 KB
+  gzipped) and the code are the rest. `HTTPD_OUT_MAX` (4 KB a
+  connection) and `MAX_CONNS` (3) are the knobs, and are not tuned yet.
+- **Not yet checked:** all of the port's side: joining, mDNS, a browser,
+  speed, and several connections at once, on the board.
 
 ## 4. The shell
 
@@ -2483,3 +2667,23 @@ in [milestones.md](milestones.md).
   Measure each flavour's RAM, `ntp.uf2`'s size and its time from Enter to
   the prompt. (*The owner, 2026-10-23:* the AON timer's drift against NTP
   is not measured: the clock is for general use.)
+
+- **M13 — A web file manager (proposed 2026-10-30, §3.9).** `web.uf2` and
+  the W builds' `web`/`WEB` builtin. In steps:
+  1. A build of `web.uf2` with lwIP's TCP and an empty page, to measure its
+     size against the SRAM budget (§3.9's estimates) before going on.
+  2. `src/core/web.c` and `test_web`: the request line and query, URL
+     decoding, name and path checks, JSON, FAT times, and the upload's
+     `name.new` steps over FAT16 and FAT32 with write faults.
+  3. The server and the page in `src/web/`, with the API of §3.9 except
+     `flash`; the `web` builtin, with a host test of its record.
+  4. `flash`: `/web/install`, read, deleted and run by the shell at start,
+     with host tests over a power cut between each step.
+  5. The documents: both user guides, `man`/`HELP`, `THIRD-PARTY.md`.
+
+  Done when, on the board: a browser on a Mac lists, uploads, downloads,
+  renames, deletes and makes folders on the card, and a file of several MB
+  compares byte for byte each way; a dropped upload leaves no file; an
+  installed UF2 runs and the shell comes back; and the speeds and `web.uf2`'s
+  size are measured. Not checked until it is: a second client at once,
+  and a phone's browser.

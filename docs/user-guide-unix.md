@@ -447,6 +447,7 @@ have it every time.
 | `date [-u]` | the date and time; `-u` in UTC. Says `clock not set`, with status 1, when it is not |
 | `date [-u] mmddHHMM[[cc]yy]` | sets the date and time: month, day, hour, minute and the year, which may be left off. `-u` takes it as UTC |
 | `ntp [-f]` | in the Pico 2 W build: sets the clock from the network, once each power-on; `-f` tries again |
+| `web` | in the Pico 2 W build: manages the card from a browser, over Wi-Fi, until Esc |
 
 `date`:
 
@@ -518,6 +519,39 @@ timeout  = 20                   # seconds to join and get the time, 5 to 60
 | `no time from the server` | the server did not answer in time |
 | `stopped` | Esc, Break or Ctrl-C |
 | `ntp.uf2 did not finish` | the program was cut off: power, or a reset |
+
+
+`web`:
+
+- `web` manages the card from a browser on the same network: list
+  folders, upload (drag files onto the page, or paste them), download,
+  rename, move, delete and make folders. It runs the program `web.uf2`,
+  found as `ntp.uf2` is, which joins the network, shows its address on the
+  screen and answers a browser there, and at `http://picocalc.local/`. Without it, `web` says `web: not found`.
+- It joins the network `/ntp/ntp.cfg` names (the file `ntp` reads; only `ssid`,
+  `password`, `country` and `timeout` matter to it), written with vi.
+  It joins as a client of the network: it makes no network of its own.
+- **There is no password.** While it runs, anyone on the network can read
+  and change everything on the card. Use it on a network you trust.
+- Esc, Break or Ctrl-C on the PicoCalc stops it and comes back to the
+  shell.
+- A file is written to `name.new` first and put in place when it is whole,
+  so a transfer that breaks off leaves the old file as it was. Names are
+  shown as UTF-8; a name from the browser that the card's character set
+  (CP437) cannot spell is refused.
+- Installing a program from the page is not there yet.
+- It is the Pico 2 W build's; with `web` on a Pico 2 you get
+  `web: not on this machine`.
+
+| `web.uf2` says | Means |
+|---|---|
+| `The card cannot be read.` | no card, or one that is not FAT |
+| `Line N: ...` | a mistake in `/ntp/ntp.cfg`; each key once |
+| `It names no network.` | no `ssid` in the file |
+| `The password was refused.` | check `password` |
+| `The network was not joined.` | no network by that name in range |
+| `No address from the network.` | joined, but DHCP did not answer in time |
+| `No radio.` | a Pico 2 W build on a Pico 2 |
 
 `battery`:
 
@@ -710,7 +744,8 @@ failed save leaves the old file as it was.
 /BOOT2350.ORG         UF2 Loader's own menu, run with `menu`
 /pico2-apps/          programs, run by name
 /pico2-apps/ntp.uf2   the Pico 2 W build's ntp
-/ntp/ntp.cfg          ntp's settings
+/ntp/ntp.cfg          ntp's settings, and the network web joins
+/pico2-apps/web.uf2   the Pico 2 W build's web
 /etc/profile          run each time the shell starts
 /home/                where the shell starts ($HOME)
 /.shell/              the shell's history, and large pipes while they run

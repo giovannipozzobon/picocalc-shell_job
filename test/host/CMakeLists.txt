@@ -9,6 +9,7 @@ set(SHELL_HOST_TESTS
     test_editor_vi
     test_expand
     test_files
+    test_httpd
     test_keys
     test_line
     test_parse
@@ -22,6 +23,7 @@ set(SHELL_HOST_TESTS
     test_text
     test_uf2
     test_vi
+    test_web
 )
 
 # The core's files need a disk: the host's image file, or none.
