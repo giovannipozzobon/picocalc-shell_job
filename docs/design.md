@@ -1252,6 +1252,53 @@ builds, nothing yet run on the board):*
 - **Not yet checked:** `-Os` in the shell on the board (the panel's
   speed, `usbdisk`'s, the start time).
 
+*As built, M14 step 3 (2026-10-30; host tests, and the link; on the
+board not yet):*
+
+- **The pairing's file is `src/core/btstore.c`**, out of `btkbd.c`:
+  `bt_store_load()` (an empty store, with the magic, whatever the file;
+  btpair 1.0's older file carried over and flagged to be saved, one that
+  is not this told as bad), `bt_store_save()` (makes `/bluetooth`, writes
+  `pairing.dat.new` and puts it in place: btpair rewrites the file in
+  place, but only one of the two runs at a time) and the records as
+  BTstack's TLV calls want them. `test_btstore` runs over FAT16 and
+  FAT32: the records and their limits (tag 0, 72 bytes, 20 records), the
+  file byte for byte as btpair lays it out (1,604 bytes: `PBK2`, then 20
+  records of tag, length and 72 bytes, little-endian), the older file,
+  five kinds of file that are not it, a directory in its place, the card
+  failing at each of 40 points of a save (the old file or the new one,
+  never half), and no card.
+- **`src/port/btkbd.c` is picocalc-extras' `btkbd.c`** with five
+  changes, made by a script that stops if any of them does not apply:
+  the storage is `btstore.c`'s; the keys are taken by `btkbd_read()` and
+  nothing wraps `sb_read_keyboard()`; the key codes are `keycodes.h`'s
+  (the same ones); and `btkbd_init()` opens the firmware file, starts
+  the radio, brings the chip up with one call in the program's own thread
+  and closes the file. That last is deliberate: the firmware is read by
+  the first thing done to the chip, and a read by BTstack's background
+  run (an interrupt) would use the card while the program may be using it.
+  The search and pairing code is left as it was and unused: pairing is
+  `btpair`'s. `cmake/bluetooth.cmake` is picocalc-extras' with the shell's
+  sources, and its two fixes to BTstack (`hci.c`, `l2cap.c`) unchanged.
+- **`btkbd-test.uf2`** (`test/pico/btkbd_test.c`) is the check on the
+  board: it starts Bluetooth from the card, says what it is doing as
+  that changes, shows each key from the Bluetooth keyboard ("bt") and
+  from the PicoCalc ("pc") with the memory BTstack has taken from
+  `malloc` (which is the number step 2 left unknown), and returns to the
+  shell on Esc. It is 203,520 B of RAM, the radio, BTstack, BLE and the
+  panel's code together, with the firmware from the card.
+- **Checked on the board by the owner, 2026-10-30** (a Pico 2 W,
+  `btkbd-test`, development build, a keyboard paired with `btpair`): the
+  keyboard connected and its keys came through ('u', '5'). The radio was
+  up in 1,027 ms from the call to `btkbd_init()` (the firmware from the
+  card is 0.9 s of that, step 2). **BTstack's `malloc` is 3,256 B once
+  started and 7,248 B with the keyboard connected, and did not grow with
+  the keys typed**: far under the 32 KB Diamond leaves, so the 38 KB the
+  shell will have free (above) is more than enough, and the pipes, `ls`
+  and argument buffers need not be cut. The shell's stack is in the scratch
+  bank, not here (§7). *Not measured:* the heap over a long session, a
+  reconnection after the keyboard sleeps, and BLE.
+
 **Safety on a Pico 2.** The W build would start the radio at every
 power-on, and on a Pico 2 the same pins (GP23-25, GP29) are the SMPS,
 VBUS and LED. The radio is started only when `/bluetooth/pairing.dat`

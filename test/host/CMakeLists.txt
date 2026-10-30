@@ -2,6 +2,7 @@
 # compiler and no Pico SDK. One binary per area; exit 77 is a skip.
 
 set(SHELL_HOST_TESTS
+    test_btstore
     test_clock
     test_editor_lines
     test_editor_pattern

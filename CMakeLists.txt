@@ -16,6 +16,7 @@ option(PICO_SHELL_HOST "Build the portable core and its host tests, with no Pico
 # What both flavours share (design.md §4.7)...
 set(SHELL_CORE_SOURCES
     src/core/bininfo.c
+    src/core/btstore.c
     src/core/clock.c
     src/core/editor_file.c
     src/core/fat.c
@@ -441,6 +442,46 @@ else()
         pico_enable_stdio_usb(cyw43fw-test 0)
         pico_add_extra_outputs(cyw43fw-test)
         target_link_options(cyw43fw-test PRIVATE -Wl,--print-memory-usage)
+    endif()
+
+    # The Bluetooth keyboard (design.md §3.10): btkbd.c and BTstack, and a
+    # program that shows its keys on the board.
+    if (SHELL_W)
+        include(cmake/bluetooth.cmake)
+        add_executable(btkbd-test
+            test/pico/btkbd_test.c
+            src/port/cyw43_fw.c
+            src/port/diskio.c
+            src/port/kbd.c
+            src/port/lcd.c
+            src/port/screen.c
+            src/port/sd.c
+            src/port/southbridge.c
+        )
+        pico_set_binary_type(btkbd-test no_flash)
+        pico_set_program_name(btkbd-test "btkbd-test")
+        target_include_directories(btkbd-test PRIVATE include src/port)
+        target_compile_definitions(btkbd-test PRIVATE
+            PICO_SHELL_UART=${PICO_SHELL_UART_ON}
+            PICO_SHELL_LCD_SPI_HZ=${PICO_SHELL_LCD_SPI_HZ}
+            PICO_CLOCK_ADJUST_PERI_CLOCK_WITH_SYS_CLOCK=1
+            PICO_DEFAULT_UART=0
+            PICO_DEFAULT_UART_TX_PIN=2
+            PICO_DEFAULT_UART_RX_PIN=3
+        )
+        target_link_libraries(btkbd-test
+            shell_core
+            shell_btkbd
+            cyw43_fw_stream
+            pico_stdlib
+            hardware_dma
+            hardware_i2c
+            hardware_spi
+        )
+        pico_enable_stdio_uart(btkbd-test ${PICO_SHELL_UART_ON})
+        pico_enable_stdio_usb(btkbd-test 0)
+        pico_add_extra_outputs(btkbd-test)
+        target_link_options(btkbd-test PRIVATE -Wl,--print-memory-usage)
     endif()
 
     # ntp.uf2, for /pico2-apps/ in the W build: Wi-Fi and NTP in a RAM

@@ -43,6 +43,10 @@ compatible with the GPL-3.0. Its Bluetooth keyboard (design.md §3.10).
 | Here | From picocalc-extras | Changes |
 |---|---|---|
 | `cmake/cyw43_fw.cmake` | `bluetooth/bluetooth.cmake` | the technique only (a copy of an SDK file patched at configure time, the build stopping if the SDK's code has changed); the patches are new |
+| `src/port/btkbd.c`, `btkbd.h` | `bluetooth/btkbd.c`, `btkbd.h` | the pairing's storage moved to `src/core/btstore.c` and written through FatFs; the firmware read from the card; no wrap of `sb_read_keyboard()`; the starter's key codes are `keycodes.h`'s |
+| `src/core/btstore.c`, `btstore.h` | the storage section of `btkbd.c` | out of it, through FatFs and `name.new`; the file's format is the same, so `btpair`'s pairing is read |
+| `src/port/btstack_config.h` | `bluetooth/btstack_config.h` | none |
+| `cmake/bluetooth.cmake` | `bluetooth/bluetooth.cmake` | the sources are the shell's; the two fixes to BTstack are unchanged; no wrap |
 
 ## picocalc-text-starter — MIT, the owner's
 
