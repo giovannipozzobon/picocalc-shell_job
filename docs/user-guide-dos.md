@@ -693,7 +693,7 @@ last: type to replace it, or Backspace to change it.
 Save writes the file through `NAME.TXT.new`, so a cut in the power
 leaves the old file or the new one. Exit and New ask before they lose a
 change. EDIT keeps the file's line endings, `CR LF` or `LF`; a new file
-gets `LF`. A file larger than 64 KB is not opened. A read-only file
+gets `LF`. A file larger than 64 KB (32 KB in the Pico 2 W build) is not opened. A read-only file
 opens, but must be saved under another name.
 
 ## 8. The card
@@ -750,7 +750,7 @@ Limits:
 | A typed line | 255 characters |
 | Variables | 1 KB in all |
 | History | about 2 KB of lines |
-| A file in EDIT | 64 KB |
+| A file in EDIT | 64 KB (32 KB in the Pico 2 W build) |
 | The clipboard in EDIT | 8 KB |
 | Batch files within batch files | 3 deep |
 | A path | 255 characters |

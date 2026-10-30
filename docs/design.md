@@ -48,6 +48,7 @@ only open questions are M10's, a flash filesystem for programs to share
 | 2026-10-25 | The shell does not load RAM UF2s itself or keep itself resident across one; stage3 loads them, after a reboot. M7's patched stage3 skips its 0.5 s wait for a key when a command is waiting, which takes most of the time out of each trip to a program and back. | 10 |
 | 2026-10-25 | Under M7, only a power-on gives the shell with no command; a program's `watchdog_reboot()` with no command restarts it, as under the stock loader. A restart loop is broken by holding Up/F1/F5 through the restart, which stage3 watches for after draining the FIFO, or by a power cycle. The commands in the watchdog's scratch registers stay stock 2.5's, so the shell and programs run the same under either loader (the owner). A RAM program restarts itself with `BOOT_RAM` and its own 8.3 path; its loop is broken only by a power cycle, since a command skips the watch for a key. | 10 |
 | 2026-10-30 | M13, a web file manager (§3.9): a RAM program, `web.uf2`, run by the W build's `web` builtin, as `ntp.uf2` is; it is a client of the network `/ntp/ntp.cfg` names, with no access point and no authentication for now; a file for the network alone may replace `ntp.cfg`'s later; its page is in English; its code and API come from PicoMultiLoader (the owner's, GPL-3.0). | 3.9, 10 |
+| 2026-10-30 | M14, a Bluetooth keyboard in the shell (§3.10): it goes in the existing Pico 2 W builds, not a third build; the Pico 2 W first; the BTstack licence is no obstacle (the owner); pairing is done by picocalc-extras' `btpair`, which is not rebuilt here, and the shell only reconnects, from `/bluetooth/pairing.dat`. | 3.10, 10 |
 | 2026-10-25 | M7's patched stage3 is built once for each size of flash, 4, 8 and 16 MB, each the Pico 2's board with only the flash size changed, since its partition table is fixed when it is built (the owner). | 10 |
 
 References: **HW §N** is [hardware-notes.md](hardware-notes.md). **EL §N** is
@@ -987,7 +988,7 @@ the owner's code, GPL-3.0), so the page and the API are not new:
 
 PicoMultiLoader's `POST /api/wifi` is left out: the network is the file's.
 
-**Installing.** `web.uf2` may not flash, since that is `loader.c`'s and
+**Installing** (*on hold, 2026-10-30: not built yet; the design below stands for when it is*). `web.uf2` may not flash, since that is `loader.c`'s and
 `uf2.c`'s work (above). `POST /api/flash` checks only that the file is
 there and ends in `.uf2`, writes its path to `/web/install`, and returns
 to the shell as above. The shell, when it starts, reads `/web/install` if
@@ -1121,6 +1122,147 @@ host's `test_web`, over FAT16 and FAT32):*
   connection) and `MAX_CONNS` (3) are the knobs, and are not tuned yet.
 - **Not yet checked:** all of the port's side: joining, mDNS, a browser,
   speed, and several connections at once, on the board.
+
+### 3.10 A Bluetooth keyboard (M14)
+
+*Proposed 2026-10-30, with the owner's answers of the same day (the table
+above).* A Bluetooth keyboard, paired beforehand with `btpair` from
+[picocalc-extras](../../picocalc-extras_job/bluetooth/) (not rebuilt here),
+types in the shell next to the PicoCalc's own keys, at the prompt and in
+vi. The model is picocalc-extras' `btkbd.c` (MIT; BTstack on the CYW43439,
+classic and BLE), which Diamond uses.
+
+**What carries over easily.** `btkbd` hands out `(state << 8) | code`, with
+the text starter's key codes, which are `keycodes.h`'s: so its events go
+into `kbd.c`'s ring as the southbridge's do. The pairing is in
+`/bluetooth/pairing.dat`, a file this side only has to read and write
+through FatFs in the same format, so `btpair` is used as it is.
+
+**What does not: the RAM.** *Measured 2026-10-30* (the link map of the
+`pico2_w` development build with picocalc-extras' `btkbd.c`, BTstack and
+the CYW43 driver linked into the shell, stand-ins for the starter's FAT
+and keyboard calls; a probe, not kept: its diff is not in the tree):
+
+| | Bytes |
+|---|---:|
+| The W shell alone | 454,816 |
+| With Bluetooth | 878,952 (167.7% of the 512 KB region) |
+| of which the CYW43 firmware (Wi-Fi, CLM and the driver's tables) | 240,471 |
+| BTstack, `btkbd.c` and its two patched copies, the driver's rest | 166,000 |
+| of which BLE (`sm`, micro-ecc, GATT client, HID-over-GATT host, ATT) | 66,000 |
+
+So the shell does not hold Bluetooth as it is: the 70 KB it has free is
+far from what it needs, which is also why Wi-Fi is in `ntp.uf2` (§3.8).
+What would bring it in, each a *measure-first estimate*:
+
+1. **The firmware read from the card, not held.** `cyw43_download_resource`
+   copies from a pointer in 512-byte blocks, and the check before it reads
+   the blob's tail: a patch to `cyw43_ll.c` made at configure time, as
+   `bluetooth.cmake` patches BTstack, reads them through a hook from a file
+   on the card (the SDK's header turned into `cyw43-fw.bin` by the build).
+   The Bluetooth firmware (about 8 KB) stays in RAM. Saves about 232 KB.
+2. **Classic Bluetooth only.** Without BLE, 66 KB less, and a few KB
+   more in `hci.c`, `l2cap.c` and `btkbd.c`. It costs the BLE keyboards
+   and mice (btpair marks them "(BLE)").
+3. **Trimming the shell** for the Bluetooth builds (`config.h`): vi's
+   buffer, journal and register, the pipes, `ls`'s names; and `-Os`.
+   Link with 1 and 2: about 563 KB, 39 KB over the region, and BTstack
+   takes about 32 KB from `malloc` as it connects (Diamond leaves that
+   much), so about 70 KB must be found.
+
+*The owner's answers, 2026-10-30:* BLE is needed (so the classic-only
+saving above is not taken), the firmware is read from the card, and
+vi's buffer may go to about 32 KB in the W builds. *Measured the same
+day with the same probe* (link maps of the `pico2_w` development build;
+the firmware, 232 KB, is taken out of the Bluetooth figures, as reading
+it from the card would):
+
+| Shell W build | Bytes | With Bluetooth, BLE too, firmware from the card | Free of 524,288 |
+|---|---:|---:|---:|
+| as it is (`-O3`) | 454,816 | about 581,000 | none |
+| `-Os` | 398,492 | about 525,000 | none |
+| `-Os`, vi at 32 KB, journal 8 KB, register 4 KB | 353,436 | about 480,000 | about 44,000 |
+| the same, pipes 4 KB, `ls` 4 KB / 128 entries, argument text 2 KB | 303,732 | 431,000 | about 93,000 |
+
+So Bluetooth with BLE costs the shell about 127 KB (BTstack and `btkbd.c`
+and its two patched copies, the driver, the Bluetooth firmware), and it
+fits with `-Os` and vi at 32 KB, with 44 KB left for what BTstack takes
+from `malloc` as it connects and for the stack. How much that is is not
+measured (Diamond leaves 32 KB, with larger buffers than a keyboard
+needs); smaller pipes and `ls` buffers (the last row) give a margin, and
+are the next thing to give up if the first measurement on the board
+finds too little. The Pico 2 build, which has no Bluetooth, can keep its
+buffers; `-Os` and the smaller vi are for the W builds, which are the
+ones that carry the radio.
+
+*As built, M14 step 2 (2026-10-30; the link maps of the `pico2_w`
+builds, nothing yet run on the board):*
+
+- **The firmware from the card.** `cmake/cyw43_fw.cmake` patches a copy
+  of the SDK's `cyw43_ll.c` at configure time (the build stops with a
+  message if the SDK's code at any of the four places has changed) so that
+  a target built with `CYW43_FW_STREAM=1` reads the firmware through
+  `cyw43_fw_read()`: the check of the blob's tail, the download in
+  64-byte blocks, and the CLM blob; the NVRAM and everything else are read
+  from memory as before. `fw_data` is an address no memory has
+  (`0xa0000000`). Targets built without the definition (`ntp.uf2`,
+  `web.uf2`) compile the original code from the same copy.
+- **`tools/cyw43-fw.py`** turns the SDK's array, the one the driver uses
+  with Bluetooth (`wb43439A0_7_95_49_00_combined.h`: Wi-Fi 231,077 B and
+  CLM 984 B), into `cyw43-fw.bin` (232,408 B: the Wi-Fi firmware padded to
+  512, then the CLM) and into the header that replaces the array, with the
+  lengths from the SDK header, so the file and the program always agree.
+  The build puts both in `build/pico-w/cyw43fw/`; the user copies the file
+  to `/bluetooth/cyw43-fw.bin`. `src/port/cyw43_fw.c` opens it, refuses one
+  that is not the length this program was built with, and reads it through
+  FatFs. It is open until the chip is up: `cyw43_arch_init()` does not load
+  the firmware, the first thing done to the chip does (`cyw43_arch_enable_sta_mode()`,
+  a read of the MAC, or Bluetooth's start); the first run of the test closed
+  the file after the init, and the chip never came up (the owner, 2026-10-30).
+- **`cyw43fw-test.uf2`** (`test/pico/cyw43fw_test.c`) is the check on the
+  board: it opens the file, starts the radio, says how long that took and
+  the chip's address, lights the LED, and scans for networks, which needs
+  the CLM too. As a RAM program it returns to the shell as `ntp.uf2` does, with `BOOT_SD`
+  written by itself, since `picocalc_shell_exit()` only accepts a program in flash. It is 96 KB of RAM, where `ntp.uf2`, which holds the
+  firmware, is 366 KB. Streaming also gives `ntp.uf2` and `web.uf2` about
+  230 KB back, if they ever want it; they do not use it now.
+- **The W builds are built for size.** `-Os` for everything, the SDK's
+  and TinyUSB's code too, except the panel's and the card's drivers
+  (`lcd.c`, `screen.c`, `sd.c`, `diskio.c`), whose loops are hot and keep
+  `-O3`; and vi's and EDIT's buffer is 32 KB (journal 8 KB, register 4 KB),
+  from `SHELL_COMPACT`, which only the W builds set. The host's tests run
+  vi and EDIT in both sizes (`test_vi_compact`, `test_edit_compact`); the
+  Pico 2 build keeps its full size.
+- **The shell's RAM, as built:** UNIX W development build 359,452 B (was
+  454,816), release 355,980 B, DOS W 348,760 B, against 524,288. With
+  Bluetooth's 127 KB that is about 486 KB, leaving about 38 KB for
+  BTstack's `malloc` and the stack, a little under what the probe gave
+  (44 KB), as the panel's and card's code stays at `-O3`. The pipes
+  (2 x 16 KB), `ls`'s buffers and the argument text are the next room, 50 KB,
+  if the board says it is too little. `ntp.uf2` 366,160 B, `web.uf2`
+  458,036 B (both smaller too).
+- **Checked on the board by the owner, 2026-10-30** (a Pico 2 W,
+  `cyw43fw-test`, development build): the radio comes up from the file,
+  with the address, the LED and a scan; the driver made 3,613 reads of
+  the file (the 232,408 bytes in blocks of 64), and the radio was up in
+  906 ms from `cyw43_arch_init()` to the MAC, which is about 260 KB/s
+  through 64-byte `f_read`s: slower than the card, and the cost of every
+  start of the radio with a pairing on the card. It can be less if the
+  hook reads larger pieces ahead. The program came back to the shell.
+- **Not yet checked:** `-Os` in the shell on the board (the panel's
+  speed, `usbdisk`'s, the start time).
+
+**Safety on a Pico 2.** The W build would start the radio at every
+power-on, and on a Pico 2 the same pins (GP23-25, GP29) are the SMPS,
+VBUS and LED. The radio is started only when `/bluetooth/pairing.dat`
+exists and the board reads as a W (to check, with the unchecked item in
+§3.8), and a `bt off` stops it.
+
+**To check on the board:** that BTstack's background run (an interrupt
+and the async context) does not disturb the card, the panel's DMA or
+`usbdisk`; that a keyboard connects after a program and back (the
+connection is lost at each reboot); the battery's cost with the radio on;
+and that a Pico 2 with the W build fails cleanly.
 
 ## 4. The shell
 
@@ -2668,7 +2810,7 @@ in [milestones.md](milestones.md).
   the prompt. (*The owner, 2026-10-23:* the AON timer's drift against NTP
   is not measured: the clock is for general use.)
 
-- **M13 — A web file manager (proposed 2026-10-30, §3.9).** `web.uf2` and
+- **M13 — A web file manager (proposed 2026-10-30, §3.9; steps 1-3 done, step 4 on hold by the owner, 2026-10-30).** `web.uf2` and
   the W builds' `web`/`WEB` builtin. In steps:
   1. A build of `web.uf2` with lwIP's TCP and an empty page, to measure its
      size against the SRAM budget (§3.9's estimates) before going on.
@@ -2677,8 +2819,9 @@ in [milestones.md](milestones.md).
      `name.new` steps over FAT16 and FAT32 with write faults.
   3. The server and the page in `src/web/`, with the API of §3.9 except
      `flash`; the `web` builtin, with a host test of its record.
-  4. `flash`: `/web/install`, read, deleted and run by the shell at start,
-     with host tests over a power cut between each step.
+  4. *On hold (the owner, 2026-10-30; to be taken up later):* `flash`:
+     `/web/install`, read, deleted and run by the shell at start, with host
+     tests over a power cut between each step; and the page's Flash button.
   5. The documents: both user guides, `man`/`HELP`, `THIRD-PARTY.md`.
 
   Done when, on the board: a browser on a Mac lists, uploads, downloads,
@@ -2687,3 +2830,18 @@ in [milestones.md](milestones.md).
   installed UF2 runs and the shell comes back; and the speeds and `web.uf2`'s
   size are measured. Not checked until it is: a second client at once,
   and a phone's browser.
+
+- **M14 — A Bluetooth keyboard (proposed 2026-10-30, §3.10).** In steps,
+  each ending in a measurement or a test before the next:
+  1. *Done 2026-10-30:* the probe of §3.10, the RAM it needs.
+  2. *Built 2026-10-30, on the board not yet:* room: the firmware from the card (`cyw43_ll.c`'s patch, `cyw43-fw.bin`
+     and its tool), `-Os` and vi at 32 KB in the W builds (BLE stays, the
+     owner, 2026-10-30), until the link has the room §3.10 measured.
+  3. `src/core/btstore.c` (the pairing file's format, through FatFs) with
+     host tests, and `src/port/btkbd.c` adapted from picocalc-extras.
+  4. The radio's start (only with a pairing on the card), the events into
+     `kbd.c`'s ring, off during `usbdisk` and before a program.
+  5. On the board, with the owner's keyboard: typing at the prompt and in
+     vi, back from a program, `usbdisk` and the panel with the radio on,
+     battery, and a Pico 2.
+  6. The `bt` builtin, `info`, the guides, `THIRD-PARTY.md`, milestones.md.

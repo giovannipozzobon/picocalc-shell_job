@@ -69,6 +69,17 @@ target_include_directories(test_edit PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_options(test_edit PRIVATE ${SHELL_WARNINGS})
 add_test(NAME test_edit COMMAND test_edit)
 
+# vi and EDIT with the W builds' smaller buffers (design.md §3.10).
+add_executable(test_vi_compact test_vi.c)
+target_link_libraries(test_vi_compact PRIVATE shell_core_compact shell_host_disk)
+add_executable(test_edit_compact test_edit.c)
+target_link_libraries(test_edit_compact PRIVATE shell_core_dos_compact shell_host_disk)
+foreach(t test_vi_compact test_edit_compact)
+    target_include_directories(${t} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_options(${t} PRIVATE ${SHELL_WARNINGS})
+    add_test(NAME ${t} COMMAND ${t})
+endforeach()
+
 # The port's renderer has no SDK header, so it is tested here on its own
 # source, against a model of the panel in place of lcd.c.
 add_executable(test_screen test_screen.c fake_lcd.c ${CMAKE_SOURCE_DIR}/src/port/screen.c)

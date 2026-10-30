@@ -35,6 +35,15 @@ The same licence as this project, and the same owner (who confirmed on
 | `src/web/lwipopts.h` | `rp2xxx/src/lwipopts.h` | no DNS client, no raw API; smaller pools |
 | `src/core/httpd.c`, `web.c` | `rp2xxx/src/webserver.c` | the routes and the upload's way of working, rewritten with no lwIP in them, in CP437 and UTF-8, and through `name.new` |
 
+## picocalc-extras — MIT
+
+Copyright (c) 2026 Chris Torkildson, under the MIT licence, which is
+compatible with the GPL-3.0. Its Bluetooth keyboard (design.md §3.10).
+
+| Here | From picocalc-extras | Changes |
+|---|---|---|
+| `cmake/cyw43_fw.cmake` | `bluetooth/bluetooth.cmake` | the technique only (a copy of an SDK file patched at configure time, the build stopping if the SDK's code has changed); the patches are new |
+
 ## picocalc-text-starter — MIT, the owner's
 
 <https://github.com/BlairLeduc/picocalc-text-starter>, Copyright (c) 2025

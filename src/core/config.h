@@ -121,9 +121,22 @@
  * larger than it is refused, not cut short. The undo journal drops its
  * oldest steps to make room (editor_undo.h). The screen is VI_TEXT_ROWS
  * of text and a status row. */
+/* The W builds (SHELL_COMPACT, set by CMakeLists.txt) carry the radio's
+ * driver and Bluetooth's BTstack, about 127 KB, and have room for them
+ * by holding a smaller file in vi (design.md §3.10). The host's builds
+ * and the Pico 2's keep the full size. */
+#ifndef SHELL_COMPACT
+#define SHELL_COMPACT 0
+#endif
+#if SHELL_COMPACT
+#define VI_BUF_SIZE        32768u
+#define VI_COPY_SIZE       4096u
+#define VI_UNDO_SIZE       8192u
+#else
 #define VI_BUF_SIZE        65536u
 #define VI_COPY_SIZE       8192u
 #define VI_UNDO_SIZE       16384u
+#endif
 #define VI_TEXT_ROWS       31
 #define VI_TAB_STOP        8u     /* a tab's width on screen */
 #define VI_SHIFT_WIDTH     4u     /* the spaces > and < add and take */

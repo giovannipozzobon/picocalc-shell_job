@@ -72,7 +72,7 @@ include(cmake/fatfs.cmake)
 # `ntp` builtin if ntp is 1 (design.md §3.8). It uses FatFs's API for
 # files (design.md §5); the disk under it is the port's (the SD card) or
 # the host's (an image file).
-function(shell_core_library name flavour ntp)
+function(shell_core_library name flavour ntp compact)
     if (flavour STREQUAL "unix")
         add_library(${name} STATIC ${SHELL_CORE_SOURCES} ${SHELL_UNIX_SOURCES})
         target_compile_definitions(${name} PUBLIC SHELL_DOS=0)
@@ -83,6 +83,7 @@ function(shell_core_library name flavour ntp)
         message(FATAL_ERROR "shell: PICO_SHELL_FLAVOUR is unix or dos, not ${flavour}")
     endif()
     target_compile_definitions(${name} PUBLIC SHELL_NTP=${ntp})
+    target_compile_definitions(${name} PUBLIC SHELL_COMPACT=${compact})
     target_include_directories(${name} PUBLIC src/core)
     target_compile_options(${name} PRIVATE ${SHELL_WARNINGS})
     # Pico Logo's key layer cuts its Ctrl-G report to the status row on
@@ -108,8 +109,12 @@ if (PICO_SHELL_HOST)
 
     shell_fatfs_library()
     # The host has the W build's `ntp`, so its tests run (design.md §3.8).
-    shell_core_library(shell_core unix 1)
-    shell_core_library(shell_core_dos dos 1)
+    shell_core_library(shell_core unix 1 0)
+    shell_core_library(shell_core_dos dos 1 0)
+    # The W builds' smaller vi and EDIT buffers, tested as they are built
+    # (design.md §3.10).
+    shell_core_library(shell_core_compact unix 1 1)
+    shell_core_library(shell_core_dos_compact dos 1 1)
     # Only the host formats disks: the tests' FAT16 and FAT32 images.
     target_compile_definitions(shell_fatfs PUBLIC SHELL_FATFS_MKFS=1)
 
@@ -166,7 +171,16 @@ else()
     # its own directory.
     set(PICO_SHELL_FLAVOUR unix CACHE STRING "The command line's flavour: unix or dos")
     shell_fatfs_library()
-    shell_core_library(shell_core ${PICO_SHELL_FLAVOUR} ${SHELL_W})
+    shell_core_library(shell_core ${PICO_SHELL_FLAVOUR} ${SHELL_W} ${SHELL_W})
+    # The W builds are built for size (-Os, the SDK's and TinyUSB's code
+    # too), except the drivers whose loops are hot: the panel and the card
+    # stay at -O3. The room is what Bluetooth takes (design.md §3.10).
+    if (SHELL_W)
+        set(CMAKE_C_FLAGS_RELEASE "-Os -DNDEBUG")
+        set_source_files_properties(
+            src/port/diskio.c src/port/lcd.c src/port/screen.c src/port/sd.c
+            PROPERTIES COMPILE_OPTIONS -O3)
+    endif()
 
     # The version for the banner, git describe --always --dirty, taken at
     # build time; the header only changes when the text does.
@@ -386,6 +400,48 @@ else()
     pico_enable_stdio_uart(rtc-stop 1)
     pico_enable_stdio_usb(rtc-stop 0)
     pico_add_extra_outputs(rtc-stop)
+
+    # The CYW43's firmware read from the card, not held in RAM, and a
+    # program that checks it on the board (design.md §3.10).
+    if (SHELL_W)
+        include(cmake/cyw43_fw.cmake)
+        cyw43_fw_stream_setup()
+        add_executable(cyw43fw-test
+            test/pico/cyw43fw_test.c
+            src/port/cyw43_fw.c
+            src/port/diskio.c
+            src/port/kbd.c
+            src/port/lcd.c
+            src/port/screen.c
+            src/port/sd.c
+            src/port/southbridge.c
+        )
+        pico_set_binary_type(cyw43fw-test no_flash)
+        pico_set_program_name(cyw43fw-test "cyw43fw-test")
+        target_include_directories(cyw43fw-test PRIVATE include src/port)
+        target_compile_options(cyw43fw-test PRIVATE ${SHELL_WARNINGS})
+        target_compile_definitions(cyw43fw-test PRIVATE
+            PICO_SHELL_UART=${PICO_SHELL_UART_ON}
+            PICO_SHELL_LCD_SPI_HZ=${PICO_SHELL_LCD_SPI_HZ}
+            PICO_CLOCK_ADJUST_PERI_CLOCK_WITH_SYS_CLOCK=1
+            PICO_DEFAULT_UART=0
+            PICO_DEFAULT_UART_TX_PIN=2
+            PICO_DEFAULT_UART_RX_PIN=3
+        )
+        target_link_libraries(cyw43fw-test
+            shell_core
+            cyw43_fw_stream
+            pico_stdlib
+            pico_cyw43_arch_none
+            hardware_dma
+            hardware_i2c
+            hardware_spi
+        )
+        pico_enable_stdio_uart(cyw43fw-test ${PICO_SHELL_UART_ON})
+        pico_enable_stdio_usb(cyw43fw-test 0)
+        pico_add_extra_outputs(cyw43fw-test)
+        target_link_options(cyw43fw-test PRIVATE -Wl,--print-memory-usage)
+    endif()
 
     # ntp.uf2, for /pico2-apps/ in the W build: Wi-Fi and NTP in a RAM
     # program of its own, which the shell's `ntp` runs (design.md §3.8).

@@ -236,12 +236,13 @@ static int file_tests(bool fat32) {
     CHECK(edit("vi -x f", "") == 1 && strstr(log_text, "usage"), "an unknown option");
     CHECK(edit("view", "") == 1 && strstr(log_text, "usage: view file"), "view's usage");
 
-    /* Size: 65,535 bytes open; one more is refused, not truncated. */
+    /* Size: VI_BUF_SIZE - 1 bytes open; one more is refused, not truncated. */
     static char big[VI_BUF_SIZE + 1];
     for (size_t i = 0; i < sizeof big; i++) big[i] = (i % 64 == 63) ? '\n' : (char)('a' + i % 26);
     CHECK(put_n("/big", big, VI_BUF_SIZE), "big");
-    CHECK(edit("vi /big", "") == 1 && strstr(log_text, "too large: 65536 bytes, 65535 at most"),
-          "too large: '%s'", log_text);
+    char want[64];
+    snprintf(want, sizeof want, "too large: %u bytes, %u at most", (unsigned)VI_BUF_SIZE, (unsigned)VI_BUF_SIZE - 1u);
+    CHECK(edit("vi /big", "") == 1 && strstr(log_text, want), "too large: '%s'", log_text);
     CHECK(is("/big", "") == false && got_len == VI_BUF_SIZE, "and left alone");
     CHECK(put_n("/big", big, VI_BUF_SIZE - 1), "big - 1");
     CHECK(edit("vi /big", ":w\r:q\r") == 0 && slurp("/big") && got_len == VI_BUF_SIZE - 1 &&

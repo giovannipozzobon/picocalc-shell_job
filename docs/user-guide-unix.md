@@ -676,7 +676,7 @@ from the card without writing flash.
 
 ## 6. vi
 
-`vi file` edits a text file of up to 64 KB, such as a program's settings
+`vi file` edits a text file of up to 64 KB (32 KB in the Pico 2 W build), such as a program's settings
 file:
 
 ```
@@ -733,7 +733,7 @@ failed save leaves the old file as it was.
 - vi keeps a file's line endings, LF or CR LF, as they were, and whether
   the last line ends in a line break.
 - `view`, `vi -R`, and files marked read-only open read-only.
-- A file larger than 64 KB is refused, never cut short.
+- A file larger than 64 KB (32 KB in the Pico 2 W build) is refused, never cut short.
 - Long lines do not wrap: the view scrolls sideways to follow the cursor.
 - A tab shows as up to 8 spaces. A control character shows as `^X`.
 
@@ -788,7 +788,7 @@ Limits:
 | Words on a line, after globs | 128 |
 | Variables | 1 KB in all |
 | History | about 2 KB of lines |
-| A file in vi | 64 KB |
+| A file in vi | 64 KB (32 KB in the Pico 2 W build) |
 | Scripts within scripts | 3 deep |
 | A `select` in a script, `select` to `done` | 1 KB |
 | Words in a `select` and those inside it | 64, in 512 bytes |
