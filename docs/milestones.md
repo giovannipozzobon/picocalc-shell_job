@@ -63,9 +63,11 @@ BLE kept in the build; the firmware from the card; vi at 32 KB in the W
 builds; the BTstack licence no obstacle; the radio left on in `usbdisk`;
 a failed start to say one line and go on.
 
-**Not checked.** BLE keyboards and mice in the shell; vi with the
-Bluetooth keyboard; a keyboard that sleeps and reconnects, and for how
-long it stays connected; the shell with no pairing not starting the radio
+**The owner checked on a Pico 2 W (2026-10-30):** vi edited with the
+Bluetooth keyboard, and the keyboard woke from standby and reconnected.
+
+**Not checked.** BLE keyboards and mice in the shell; for how long a
+sleeping keyboard stays connected; the shell with no pairing not starting the radio
 (only seen from the log, not the board); a Pico 2 with a W build and a
 `pairing.dat` (the pins of GP23-25 and GP29); the battery's cost with
 the radio on; the DOS flavour on the board; the release build; a keyboard
