@@ -1279,7 +1279,14 @@ board not yet):*
   run (an interrupt) would use the card while the program may be using it.
   The search and pairing code is left as it was and unused: pairing is
   `btpair`'s. `cmake/bluetooth.cmake` is picocalc-extras' with the shell's
-  sources, and its two fixes to BTstack (`hci.c`, `l2cap.c`) unchanged.
+  sources, and its two fixes to BTstack (`hci.c`, `l2cap.c`) unchanged,
+  with picocalc-extras 1.3's `BTKBD_FIX_HCI` and `BTKBD_FIX_L2CAP`
+  switches (ON); a Pico SDK whose BTstack is 1.8.3 or newer may need them
+  OFF, and the build stops if one of the SDK's files has changed.
+  Checked against picocalc-extras 1.3 (Diamond's `e6a8650`, 2026-10-31):
+  `btkbd.c`, `btkbd.h` and `btstack_config.h` are the same as 1.2's, so
+  nothing in them changed; 1.3 moved only `btpair` (mice, a longer
+  message) and `bluetooth.cmake`.
 - **`btkbd-test.uf2`** (`test/pico/btkbd_test.c`) is the check on the
   board: it starts Bluetooth from the card, says what it is doing as
   that changes, shows each key from the Bluetooth keyboard ("bt") and

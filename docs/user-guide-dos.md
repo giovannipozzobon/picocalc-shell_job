@@ -390,6 +390,10 @@ timeout  = 20                   # seconds to join and get the time, 5 to 60
 - `BT` says what it is doing: `connected: K380`, `waiting for K380`, `no
   keyboard paired`, or why it is off, such as `off: no firmware file on
   the card`. `INFO` has the same line.
+- Most Low Energy keyboards choose a new identity each time they are put
+  into pairing mode, so the PicoCalc no longer knows them: if one stops
+  connecting, pair it again in `BTPAIR`. A Bluetooth mouse pairs the same
+  way, but it takes the one pairing, and the shell does not use it.
 - A program (`WEB`, an emulator) runs without it: the radio goes with the
   shell, and starts again, with the keyboard connecting again, when the
   program returns.
