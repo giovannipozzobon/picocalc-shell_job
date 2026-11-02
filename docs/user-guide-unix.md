@@ -443,7 +443,7 @@ have it every time.
 |---|---|
 | `battery` | the battery's charge, and `charging` when the charger is on |
 | `backlight [lcd\|kbd] [0-255]` | shows or sets the screen (`lcd`) or keyboard (`kbd`) backlight |
-| `info` | the shell's version, its build (Pico 2 or Pico 2 W), the chip, memory and PSRAM (0 MB on a board without it), UF2 Loader, the clock, the keyboard's firmware, the card and the battery |
+| `info` | the shell's version, its build (Pico 2 or Pico 2 W, with `BT` if it has the Bluetooth keyboard and `hdmi` if it has the HDMI mirror), the chip, memory and PSRAM (0 MB on a board without it), UF2 Loader, the clock, the keyboard's firmware, the card and the battery |
 | `date [-u]` | the date and time; `-u` in UTC. Says `clock not set`, with status 1, when it is not |
 | `date [-u] mmddHHMM[[cc]yy]` | sets the date and time: month, day, hour, minute and the year, which may be left off. `-u` takes it as UTC |
 | `ntp [-f]` | in the Pico 2 W build: sets the clock from the network, once each power-on; `-f` tries again |
@@ -579,8 +579,10 @@ timeout  = 20                   # seconds to join and get the time, 5 to 60
   the card`. `info` has the same line.
 - Most Low Energy keyboards choose a new identity each time they are put
   into pairing mode, so the PicoCalc no longer knows them: if one stops
-  connecting, pair it again in `btpair`. A Bluetooth mouse pairs the same
-  way, but it takes the one pairing, and the shell does not use it.
+  connecting, pair it again in `btpair`. A Bluetooth mouse can be paired
+  beside the keyboard (btpair 2.1 keeps one of each): it connects when
+  the radio starts, but the shell does not use it, and `bt` speaks of the
+  keyboard only.
 - A program (`web`, an emulator) runs without it: the radio goes with the
   shell, and starts again, with the keyboard connecting again, when the
   program returns.

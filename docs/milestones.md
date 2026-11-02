@@ -16,6 +16,28 @@ Each entry gives:
 - a **not checked** list, carried forward until something checks each item
   or a decision drops it.
 
+## M14, follow-up — btpair 2.1's keyboard and mouse (2026-11-02, branch `m15-hdmi`)
+
+picocalc-extras' `btkbd.c` was rewritten for a mouse beside the keyboard
+(btpair 2.0 and 2.1). The shell's `btkbd.c` was brought to it (design.md
+§3.10, the end), keeping the shell's changes, since the old one would have
+taken a mouse that connects by itself for the keyboard.
+
+**Checked on the host.** The new original against the shell's file: the
+only differences are the shell's own (the storage on `btstore.c`, the
+firmware's open and close, the tags' names). `test_btstore`: the two mouse
+tags' bytes (`PTR0`, `PTL0`), and a keyboard and mouse records beside each
+other, one removed with the other kept. All 33 host tests pass; the W
+builds (UNIX, DOS, release, HDMI) build with no warnings. RAM: the UNIX W
+release build 494,724 B, 29,564 B free (was 492,620); the development W
+build 497,664 B (was 495,424), 26,624 B free; DOS W 486,960 B, 37,328 B
+free.
+
+**Not checked on the board.** All of it: a keyboard alone paired with
+btpair 2.1 (the file's format and the reconnection), a keyboard and a mouse
+together, a mouse alone, a BLE mouse, a file paired by the earlier btpair
+read now, and `usbdisk` and the battery with two devices connected.
+
 ## M15 — An HDMI mirror (2026-11-01, branch `m15-hdmi`)
 
 **Built 2026-11-01; the owner ran it on the board 2026-11-02 and the

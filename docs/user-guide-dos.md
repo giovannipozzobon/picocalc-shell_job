@@ -243,7 +243,7 @@ copy is always byte for byte), so `COPY NAME+,,` is the same.
 | `BACKLIGHT [lcd\|kbd] [0-255]` | shows or sets the screen (`lcd`) or keyboard (`kbd`) backlight |
 | `VER` | the shell's version |
 | `MEM` | the memory in use and free, and the PSRAM: 8 MB on the Pimoroni Pico Plus 2 W, 0 on a board without it |
-| `INFO` | the shell's version, its build (Pico 2 or Pico 2 W), the chip, memory and PSRAM (0 MB on a board without it), UF2 Loader, the clock, the keyboard's firmware, the card and the battery |
+| `INFO` | the shell's version, its build (Pico 2 or Pico 2 W, with `BT` if it has the Bluetooth keyboard and `hdmi` if it has the HDMI mirror), the chip, memory and PSRAM (0 MB on a board without it), UF2 Loader, the clock, the keyboard's firmware, the card and the battery |
 | `DATE [/T \| date]` | shows the date and asks for a new one; Enter keeps it. `DATE 10-22-26` sets it, `DATE /T` only shows it |
 | `TIME [/T \| time]` | the same for the time: `TIME 14:30`, `TIME 2:30p`, `TIME 9:05:30` |
 | `NTP [/F]` | in the Pico 2 W build: sets the clock from the network, once each power-on; `/F` tries again |
@@ -393,8 +393,10 @@ timeout  = 20                   # seconds to join and get the time, 5 to 60
   the card`. `INFO` has the same line.
 - Most Low Energy keyboards choose a new identity each time they are put
   into pairing mode, so the PicoCalc no longer knows them: if one stops
-  connecting, pair it again in `BTPAIR`. A Bluetooth mouse pairs the same
-  way, but it takes the one pairing, and the shell does not use it.
+  connecting, pair it again in `BTPAIR`. A Bluetooth mouse can be paired
+  beside the keyboard (btpair 2.1 keeps one of each): it connects when
+  the radio starts, but the shell does not use it, and `bt` speaks of the
+  keyboard only.
 - A program (`WEB`, an emulator) runs without it: the radio goes with the
   shell, and starts again, with the keyboard connecting again, when the
   program returns.

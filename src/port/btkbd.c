@@ -15,7 +15,9 @@
  * card (cyw43_fw.h) and not held in RAM; and the keys are taken by
  * btkbd_read() alone, where the library wrapped sb_read_keyboard(). The
  * search and pairing code is as it was, and not used by the shell: pairing
- * is btpair's. */
+ * is btpair's. Updated to picocalc-extras' btpair 2.1 (a keyboard and a
+ * mouse, each in its own slot); the shell uses the keyboard, and the
+ * mouse is connected but its movement is not read. */
 #include "btkbd.h"
 
 #include <stdio.h>
@@ -114,28 +116,71 @@ void btstack_cyw43_deinit(async_context_t *context)
 
 /* ------------------------------------------------------------ state */
 
+/* Bluetooth as a whole: OFF, STARTING, IDLE (running: see each device for
+   its own state), SEARCHING or PAIRING */
 static btkbd_state_t state = BTKBD_OFF;
 static char status[48] = "Bluetooth off";
 static char code[12];			/* what to type while pairing */
 
-static bool paired, paired_le;
-static bd_addr_t paired_addr;
-static bd_addr_type_t paired_type;		/* (BLE) */
-static char paired_name[33];
+/* A keyboard and a mouse, each paired, kept and connected on its own. */
+typedef struct {
+	uint32_t tag, tag_le;		/* its record in the store: classic, BLE */
+	bool paired, le;
+	bd_addr_t addr;
+	bd_addr_type_t type;		/* (BLE) */
+	char name[33];
+	bool connected;
+	/* classic: the HID connection, or 0 */
+	uint16_t cid;
+	bool boot_mode;			/* that connection is in the simple boot mode */
+	bool descriptor_ok;
+	int stuck;
+	btstack_timer_source_t stall_timer;
+	hci_con_handle_t stall_handle;
+	/* BLE: the connection, and the HID service on it */
+	hci_con_handle_t le_handle;
+	uint16_t hids_cid;
+} slot_t;
 
-static uint16_t cid;			/* the HID connection, or 0 */
-static bool boot_mode;			/* that connection is in the keyboard's simple boot mode */
-static bool descriptor_ok;
-static uint8_t descriptor[512];
+static slot_t slots[2] = {
+	[BTKBD_KEYBOARD] = { .tag = BT_TAG_KEYBOARD, .tag_le = BT_TAG_KEYBOARD_LE, .le_handle = HCI_CON_HANDLE_INVALID },
+	[BTKBD_MOUSE] = { .tag = BT_TAG_MOUSE, .tag_le = BT_TAG_MOUSE_LE, .le_handle = HCI_CON_HANDLE_INVALID },
+};
+#define KBD (&slots[BTKBD_KEYBOARD])
+#define MOUSE (&slots[BTKBD_MOUSE])
+static slot_t *other(slot_t *s) { return s == KBD ? MOUSE : KBD; }
+
+static slot_t *slot_by_cid(uint16_t c)
+{
+	for (int i = 0; i < 2; i++) if (c && slots[i].cid == c) return &slots[i];
+	return NULL;
+}
+static slot_t *slot_by_le(hci_con_handle_t h)
+{
+	for (int i = 0; i < 2; i++) if (h != HCI_CON_HANDLE_INVALID && slots[i].le_handle == h) return &slots[i];
+	return NULL;
+}
+static slot_t *slot_by_hids(uint16_t c)
+{
+	for (int i = 0; i < 2; i++) if (c && slots[i].hids_cid == c) return &slots[i];
+	return NULL;
+}
+static slot_t *slot_by_addr(const bd_addr_t a, bool le)
+{
+	for (int i = 0; i < 2; i++)
+		if (slots[i].paired && slots[i].le == le && bd_addr_cmp(slots[i].addr, a) == 0) return &slots[i];
+	return NULL;
+}
+
+static uint8_t descriptor[1024];		/* (classic: both devices' layouts) */
 static btstack_packet_callback_registration_t hci_cb;
 static btstack_timer_source_t retry_timer;
 #define RETRY_MS 15000
 
-/* BLE: the connection, and the HID service on it */
-static hci_con_handle_t le_handle = HCI_CON_HANDLE_INVALID;
-static uint16_t hids_cid;
-static uint8_t le_descriptor[512];
+/* BLE: one connection is made at a time */
+static uint8_t le_descriptor[1024];
 static enum { LE_IDLE, LE_SEARCHING, LE_WAITING, LE_CONNECTING } le_mode;
+static slot_t *le_connecting;			/* the device that connection is for */
 static btstack_timer_source_t le_timer;
 static bd_addr_t le_ident;			/* while pairing: its identity address, once known */
 static bd_addr_type_t le_ident_type;
@@ -143,7 +188,7 @@ static bool le_ident_known;
 static bd_addr_t le_looked_up;			/* the last private address asked about */
 static btstack_packet_callback_registration_t sm_cb;
 static void le_wait(void);
-static int classic_after_le = -1;	/* a pairing waiting for the BLE keyboard to let go */
+static int classic_after_le = -1;	/* a pairing waiting for the old BLE device to let go */
 
 /* BLE pairing: the PicoCalc can show a code, and offers Secure Connections;
    it takes the older kind of pairing too, which many keyboards still use
@@ -166,10 +211,13 @@ static struct {
 	uint16_t clock;
 	bool named;
 	bool le;
+	int kind;			/* BTKBD_KEYBOARD, BTKBD_MOUSE, or -1 if it doesn't say */
 	bd_addr_type_t type;
 	char name[32];
 } found[FOUND_MAX];
 static int n_found, naming = -1, pairing_with = -1, pair_after_search = -1;
+static slot_t *pairing_slot = &slots[BTKBD_KEYBOARD];	/* what's being paired, or was last */
+static bool pair_saved;				/* the pairing got as far as being saved */
 static btstack_timer_source_t name_timer;
 #define NAME_MS 5000
 
@@ -302,24 +350,26 @@ static void start_pairing(int i);
 
 static void set_status(const char *s) { snprintf(status, sizeof status, "%s", s); }
 
-static void load_paired(void)
+static void load_slot(slot_t *s)
 {
-	bt_record_t *r = bt_store_find(&store, BT_TAG_KEYBOARD), *l = bt_store_find(&store, BT_TAG_KEYBOARD_LE);
-	paired_le = !(r && r->len >= 6) && l && l->len >= 7;
-	if (paired_le) r = l;
-	paired = r && r->len >= 6;
-	memset(paired_name, 0, sizeof paired_name);
-	if (!paired) return;
-	memcpy(paired_addr, r->data, 6);
+	bt_record_t *r = bt_store_find(&store, s->tag), *l = bt_store_find(&store, s->tag_le);
+	s->le = !(r && r->len >= 6) && l && l->len >= 7;
+	if (s->le) r = l;
+	s->paired = r && r->len >= 6;
+	memset(s->name, 0, sizeof s->name);
+	if (!s->paired) return;
+	memcpy(s->addr, r->data, 6);
 	int at = 6;
-	if (paired_le) paired_type = (bd_addr_type_t)r->data[at++];
+	if (s->le) s->type = (bd_addr_type_t)r->data[at++];
 	int n = (int)r->len - at;
-	if (n > (int)sizeof paired_name - 1) n = sizeof paired_name - 1;
-	memcpy(paired_name, r->data + at, n);
+	if (n > (int)sizeof s->name - 1) n = sizeof s->name - 1;
+	memcpy(s->name, r->data + at, n);
 }
 
-/* one keyboard at a time: a new one replaces the old */
-static void save_paired(const bd_addr_t addr, const char *name, bool le, bd_addr_type_t type)
+static void load_paired(void) { load_slot(KBD); load_slot(MOUSE); }
+
+/* one keyboard and one mouse: a new one replaces the old */
+static void save_paired(slot_t *s, const bd_addr_t addr, const char *name, bool le, bd_addr_type_t type)
 {
 	uint8_t d[BT_TLV_DATA];
 	size_t n = strlen(name), at = 6;
@@ -327,8 +377,15 @@ static void save_paired(const bd_addr_t addr, const char *name, bool le, bd_addr
 	memcpy(d, addr, 6);
 	if (le) d[at++] = (uint8_t)type;
 	memcpy(d + at, name, n);
-	tlv_delete(NULL, le ? BT_TAG_KEYBOARD : BT_TAG_KEYBOARD_LE);
-	tlv_store(NULL, le ? BT_TAG_KEYBOARD_LE : BT_TAG_KEYBOARD, d, (uint32_t)(at + n));
+	tlv_delete(NULL, le ? s->tag : s->tag_le);
+	tlv_store(NULL, le ? s->tag_le : s->tag, d, (uint32_t)(at + n));
+	/* (the same device paired as the other one too: it's only this now) */
+	slot_t *o = other(s);
+	if (o->paired && o->le == le && bd_addr_cmp(o->addr, addr) == 0) {
+		tlv_delete(NULL, o->tag);
+		tlv_delete(NULL, o->tag_le);
+	}
+	pair_saved = true;
 	load_paired();
 }
 
@@ -454,21 +511,29 @@ static void parse_report(const uint8_t *desc, uint16_t desc_len, const uint8_t *
 static volatile unsigned ptr_reports;
 static volatile int ptr_x, ptr_y, ptr_wheel, ptr_buttons;	/* added up, since the start */
 
-static void handle_report(const uint8_t *report, uint16_t len)
+/* a device let go: nothing it held is held any more */
+static void let_go(slot_t *s)
+{
+	s->connected = false;
+	if (s == KBD) release_all();
+	else ptr_buttons = 0;
+}
+
+static void handle_report(slot_t *s, const uint8_t *report, uint16_t len)
 {
 	if (len < 1 || report[0] != 0xA1) return;		/* an input report */
-	if (boot_mode)		/* the layout every keyboard has in boot mode */
+	if (s->boot_mode)	/* the layout every keyboard has in boot mode */
 		parse_report(btstack_hid_get_boot_descriptor_data(), btstack_hid_get_boot_descriptor_len(), report + 1, len - 1);
-	else if (descriptor_ok)	/* the keyboard's own layout, once it has given it */
-		parse_report(hid_descriptor_storage_get_descriptor_data(cid), hid_descriptor_storage_get_descriptor_len(cid),
+	else if (s->descriptor_ok)	/* the device's own layout, once it has given it */
+		parse_report(hid_descriptor_storage_get_descriptor_data(s->cid), hid_descriptor_storage_get_descriptor_len(s->cid),
 		             report + 1, len - 1);
 }
 
-/* a report from a BLE keyboard: as from a classic one, without the A1 */
-static void handle_le_report(uint8_t service, const uint8_t *report, uint16_t len)
+/* a report from a BLE device: as from a classic one, without the A1 */
+static void handle_le_report(slot_t *s, uint8_t service, const uint8_t *report, uint16_t len)
 {
-	parse_report(hids_host_descriptor_storage_get_descriptor_data(hids_cid, service),
-	             hids_host_descriptor_storage_get_descriptor_len(hids_cid, service), report, len);
+	parse_report(hids_host_descriptor_storage_get_descriptor_data(s->hids_cid, service),
+	             hids_host_descriptor_storage_get_descriptor_len(s->hids_cid, service), report, len);
 }
 
 static void parse_report(const uint8_t *desc, uint16_t desc_len, const uint8_t *report, uint16_t len)
@@ -484,7 +549,7 @@ static void parse_report(const uint8_t *desc, uint16_t desc_len, const uint8_t *
 		uint16_t page, usage;
 		int32_t value;
 		btstack_hid_parser_get_field(&parser, &page, &usage, &value);
-		/* a trackpad or mouse (for now only counted and shown, in btpair) */
+		/* a mouse, or a keyboard's trackpad */
 		if (page == 0x01 && (usage == 0x30 || usage == 0x31 || usage == 0x38)) {
 			pointer = true;
 			if (usage == 0x30) px = value; else if (usage == 0x31) py = value; else pw = value;
@@ -508,46 +573,88 @@ void btkbd_pointer(unsigned *reports, int *x, int *y, int *wheel, int *buttons)
 	*reports = ptr_reports, *x = ptr_x, *y = ptr_y, *wheel = ptr_wheel, *buttons = ptr_buttons;
 }
 
-/* ------------------------------------------------------------ connecting */
-
-static void try_paired(void)
+static void lock(void);
+static void unlock(void);
+bool btkbd_mouse(int *dx, int *dy, int *wheel, int *buttons)
 {
-	if (!paired || paired_le || cid || state == BTKBD_SEARCHING || state == BTKBD_PAIRING) return;
-	/* In boot mode: it goes straight to the keyboard connection, without
-	   first asking the keyboard for its layout -- which some keyboards (the
-	   K380, after pairing) don't answer, as Linux and others have found.
-	   Boot mode has all the ordinary keys. */
-	uint8_t err = hid_host_connect(paired_addr, HID_PROTOCOL_MODE_BOOT, &cid);
-	boot_mode = err == ERROR_CODE_SUCCESS;
-	/* (in the trace: AA, we asked for the keyboard connection) */
-	if (n_trace == TRACE) { memmove(trace, trace + 1, TRACE - 1); n_trace--; }
-	trace[n_trace++] = 0xAA;
-	if (err != ERROR_CODE_SUCCESS) { cid = 0; note_err("retry", err); }
+	static int took_x, took_y, took_w, took_b;
+	*dx = *dy = *wheel = *buttons = 0;
+	if (state == BTKBD_OFF) return false;
+	lock();
+	int x = ptr_x, y = ptr_y, w = ptr_wheel, b = ptr_buttons;
+	unlock();
+	*dx = x - took_x, *dy = y - took_y, *wheel = w - took_w, *buttons = b;
+	bool any = *dx || *dy || *wheel || b != took_b;
+	took_x = x, took_y = y, took_w = w, took_b = b;
+	return any;
 }
 
+/* ------------------------------------------------------------ connecting */
+
+static void trace_mark(uint8_t t)
+{
+	if (n_trace == TRACE) { memmove(trace, trace + 1, TRACE - 1); n_trace--; }
+	trace[n_trace++] = t;
+}
+
+static void try_paired(slot_t *s)
+{
+	if (!s->paired || s->le || s->cid || state != BTKBD_IDLE) return;
+	/* A keyboard in boot mode: it goes straight to the keyboard connection,
+	   without first asking the keyboard for its layout -- which some
+	   keyboards (the K380, after pairing) don't answer, as Linux and others
+	   have found. Boot mode has all the ordinary keys. A mouse in its own
+	   layout, which has the wheel. */
+	hid_protocol_mode_t mode = s == KBD ? HID_PROTOCOL_MODE_BOOT : HID_PROTOCOL_MODE_REPORT;
+	uint8_t err = hid_host_connect(s->addr, mode, &s->cid);
+	s->boot_mode = err == ERROR_CODE_SUCCESS && mode == HID_PROTOCOL_MODE_BOOT;
+	trace_mark(0xAA);		/* (in the trace: AA, we asked for the connection) */
+	if (err != ERROR_CODE_SUCCESS) { s->cid = 0; note_err("retry", err); }
+}
+
+/* now and then: give up an attempt that never finished, and try a classic
+   device that isn't connected (one at a time, taking turns) */
 static void on_retry(btstack_timer_source_t *t)
 {
 	(void)t;
-	static int stuck;
-	if (state == BTKBD_WAITING && cid) {	/* an attempt that never finished: give it up */
-		if (++stuck >= 2) { hid_host_disconnect(cid); cid = 0; stuck = 0; }
-	} else {
-		stuck = 0;
+	static int turn;
+	bool trying = false;
+	for (int i = 0; i < 2; i++) {
+		slot_t *s = &slots[i];
+		if (state == BTKBD_IDLE && s->paired && !s->le && s->cid && !s->connected) {
+			if (++s->stuck >= 2) { hid_host_disconnect(s->cid); s->cid = 0; s->stuck = 0; }
+			else trying = true;
+		} else {
+			s->stuck = 0;
+		}
 	}
-	if (state == BTKBD_WAITING && !cid) try_paired();
+	if (!trying && state == BTKBD_IDLE)
+		for (int k = 0; k < 2; k++) {
+			slot_t *s = &slots[(turn + k) % 2];
+			if (s->paired && !s->le && !s->cid) { try_paired(s); turn = (turn + k + 1) % 2; break; }
+		}
 	btstack_run_loop_set_timer(&retry_timer, RETRY_MS);
 	btstack_run_loop_add_timer(&retry_timer);
 }
 
+/* running, and not searching or pairing: the status line says how the
+   keyboard is (or the mouse, if there's no keyboard) */
 static void idle_status(void)
 {
-	if (paired) {
-		state = BTKBD_WAITING;
-		snprintf(status, sizeof status, "Waiting for %.24s", paired_name[0] ? paired_name : "the keyboard");
-	} else {
-		state = BTKBD_IDLE;
-		set_status("No keyboard paired");
-	}
+	state = BTKBD_IDLE;
+	slot_t *s = KBD->paired ? KBD : MOUSE->paired ? MOUSE : NULL;
+	if (!s) set_status("No keyboard paired");
+	else if (s->connected) snprintf(status, sizeof status, "Connected: %.30s", s->name);
+	else snprintf(status, sizeof status, "Waiting for %.24s", s->name[0] ? s->name : s == KBD ? "the keyboard" : "the mouse");
+}
+
+/* a pairing is over, one way or the other */
+static void pairing_over(const char *msg)
+{
+	pairing_with = -1;
+	idle_status();
+	if (msg) set_status(msg);
+	le_wait();
 }
 
 static void on_name_timeout(btstack_timer_source_t *t);
@@ -580,7 +687,7 @@ static void name_next(void)
 		n_found--, i--;
 	}
 	idle_status();
-	snprintf(status, sizeof status, n_found ? "Found %d: choose one" : "No keyboards found", n_found);
+	snprintf(status, sizeof status, n_found ? "Found %d: choose one" : "Nothing found", n_found);
 	if (pair_after_search < 0) le_wait();
 	if (pair_after_search >= 0) { int i = pair_after_search; pair_after_search = -1; start_pairing(i); }
 }
@@ -603,14 +710,22 @@ static void le_stop(void)
 	if (le_mode == LE_CONNECTING) gap_connect_cancel();
 	btstack_run_loop_remove_timer(&le_timer);
 	le_mode = LE_IDLE;
+	le_connecting = NULL;
 }
 
-/* paired with a BLE keyboard and not connected: listen for it (it
-   advertises when it wakes up), a slice of the time, to spare the battery */
+/* a BLE device paired and not connected: listen for it (it advertises when
+   it wakes up), a slice of the time, to spare the battery. Not while a BLE
+   connection is still being set up. */
 static void le_wait(void)
 {
-	if (!paired || !paired_le || le_handle != HCI_CON_HANDLE_INVALID || le_mode != LE_IDLE) return;
-	if (state == BTKBD_OFF || state == BTKBD_STARTING || state == BTKBD_SEARCHING || state == BTKBD_PAIRING) return;
+	if (le_mode != LE_IDLE || state != BTKBD_IDLE) return;
+	bool want = false;
+	for (int i = 0; i < 2; i++) {
+		slot_t *s = &slots[i];
+		if (s->le_handle != HCI_CON_HANDLE_INVALID && !s->connected) return;
+		want |= s->paired && s->le && s->le_handle == HCI_CON_HANDLE_INVALID;
+	}
+	if (!want) return;
 	memset(le_looked_up, 0, sizeof le_looked_up);
 	gap_set_scan_parameters(0, 0x0140, 0x0030);	/* passive: 30 ms in every 200 */
 	gap_start_scan();
@@ -623,18 +738,17 @@ static void on_le_timeout(btstack_timer_source_t *t)
 	if (le_mode != LE_CONNECTING) return;
 	gap_connect_cancel();
 	le_mode = LE_IDLE;
-	if (state == BTKBD_PAIRING) {
-		pairing_with = -1;
-		idle_status();
-		set_status("Pairing failed: try again");
-	}
+	slot_t *s = le_connecting;
+	le_connecting = NULL;
+	if (state == BTKBD_PAIRING && s == pairing_slot) pairing_over("Pairing failed: try again");
 	le_wait();
 }
 
-static void le_connect(const bd_addr_t addr, bd_addr_type_t type)
+static void le_connect(slot_t *s, const bd_addr_t addr, bd_addr_type_t type)
 {
 	if (le_mode == LE_SEARCHING || le_mode == LE_WAITING) gap_stop_scan();
 	le_mode = LE_CONNECTING;
+	le_connecting = s;
 	btstack_run_loop_remove_timer(&le_timer);
 	btstack_run_loop_set_timer_handler(&le_timer, on_le_timeout);
 	btstack_run_loop_set_timer(&le_timer, 15000);
@@ -643,6 +757,7 @@ static void le_connect(const bd_addr_t addr, bd_addr_type_t type)
 	bd_addr_copy(a, addr);
 	if (gap_connect(a, type) != ERROR_CODE_SUCCESS) {
 		le_mode = LE_IDLE;
+		le_connecting = NULL;
 		btstack_run_loop_remove_timer(&le_timer);
 	}
 }
@@ -663,17 +778,23 @@ static bool ad_name(const uint8_t *ad, uint8_t len, char *out, size_t size)
 	return false;
 }
 
-/* a keyboard, or something with the HID service */
-static bool ad_is_keyboard(const uint8_t *ad, uint8_t len)
+/* what it says it looks like: 0x03C1 a keyboard, 0x03C2 a mouse, 0x03C0 a
+   HID device of some sort; or 0 */
+static uint16_t ad_appearance(const uint8_t *ad, uint8_t len)
 {
-	if (ad_data_contains_uuid16(len, ad, ORG_BLUETOOTH_SERVICE_HUMAN_INTERFACE_DEVICE)) return true;
 	ad_context_t c;
 	for (ad_iterator_init(&c, len, ad); ad_iterator_has_more(&c); ad_iterator_next(&c))
-		if (ad_iterator_get_data_type(&c) == BLUETOOTH_DATA_TYPE_APPEARANCE && ad_iterator_get_data_len(&c) >= 2) {
-			uint16_t a = little_endian_read_16(ad_iterator_get_data(&c), 0);
-			return a == 0x03C1 || a == 0x03C0;	/* a keyboard, or a HID device */
-		}
-	return false;
+		if (ad_iterator_get_data_type(&c) == BLUETOOTH_DATA_TYPE_APPEARANCE && ad_iterator_get_data_len(&c) >= 2)
+			return little_endian_read_16(ad_iterator_get_data(&c), 0);
+	return 0;
+}
+
+/* a keyboard, a mouse, or something with the HID service */
+static bool ad_is_hid(const uint8_t *ad, uint8_t len)
+{
+	if (ad_data_contains_uuid16(len, ad, ORG_BLUETOOTH_SERVICE_HUMAN_INTERFACE_DEVICE)) return true;
+	uint16_t a = ad_appearance(ad, len);
+	return a == 0x03C0 || a == 0x03C1 || a == 0x03C2;
 }
 
 static void le_advert(const uint8_t *packet)
@@ -688,23 +809,28 @@ static void le_advert(const uint8_t *packet)
 	if (le_mode == LE_SEARCHING) {
 		int i;
 		for (i = 0; i < n_found; i++) if (found[i].le && bd_addr_cmp(found[i].addr, addr) == 0) break;
-		if (i == n_found) {			/* new: a keyboard in pairing mode? */
-			if (kind == 4 || n_found >= FOUND_MAX || !ad_is_keyboard(ad, len)) return;
+		if (i == n_found) {			/* new: a keyboard or mouse in pairing mode? */
+			if (kind == 4 || n_found >= FOUND_MAX || !ad_is_hid(ad, len)) return;
 			i = n_found++;
 			memset(&found[i], 0, sizeof found[i]);
 			bd_addr_copy(found[i].addr, addr);
 			found[i].le = true;
 			found[i].named = true;		/* (called by its address until it says) */
 			found[i].type = type;
+			found[i].kind = -1;
 			snprintf(found[i].name, sizeof found[i].name, "%s", bd_addr_to_str(addr));
 			snprintf(status, sizeof status, "Searching... found %d", n_found);
 		}
-		ad_name(ad, len, found[i].name, sizeof found[i].name);	/* (often in the scan response) */
+		uint16_t a = ad_appearance(ad, len);	/* (it may be in the scan response) */
+		if (a == 0x03C1) found[i].kind = BTKBD_KEYBOARD;
+		if (a == 0x03C2) found[i].kind = BTKBD_MOUSE;
+		ad_name(ad, len, found[i].name, sizeof found[i].name);
 		return;
 	}
-	if (le_mode != LE_WAITING || !paired_le) return;
+	if (le_mode != LE_WAITING) return;
 	if (kind != 0 && kind != 1) return;		/* only advertising that takes a connection */
-	if (bd_addr_cmp(addr, paired_addr) == 0) { le_connect(addr, type); return; }
+	slot_t *s = slot_by_addr(addr, true);
+	if (s && s->le_handle == HCI_CON_HANDLE_INVALID) { le_connect(s, addr, type); return; }
 	/* a private address, which changes: ask the Security Manager whose it is */
 	if (type == BD_ADDR_TYPE_LE_RANDOM && (addr[0] & 0xC0) == 0x40 && bd_addr_cmp(addr, le_looked_up) != 0) {
 		bd_addr_copy(le_looked_up, addr);
@@ -717,51 +843,47 @@ static void le_connected(const uint8_t *packet)
 	if (le_mode != LE_CONNECTING) return;		/* (not ours) */
 	btstack_run_loop_remove_timer(&le_timer);
 	le_mode = LE_IDLE;
+	slot_t *s = le_connecting;
+	le_connecting = NULL;
 	d_conn = gap_subevent_le_connection_complete_get_status(packet);
-	if (d_conn != ERROR_CODE_SUCCESS) {
-		if (state == BTKBD_PAIRING) { pairing_with = -1; idle_status(); set_status("Pairing failed: try again"); }
+	if (d_conn != ERROR_CODE_SUCCESS || !s) {
+		if (state == BTKBD_PAIRING && s == pairing_slot) pairing_over("Pairing failed: try again");
 		le_wait();
 		return;
 	}
-	le_handle = gap_subevent_le_connection_complete_get_connection_handle(packet);
-	sm_request_pairing(le_handle);	/* pairs, or (paired before) turns encryption on */
+	s->le_handle = gap_subevent_le_connection_complete_get_connection_handle(packet);
+	sm_request_pairing(s->le_handle);	/* pairs, or (paired before) turns encryption on */
 }
 
 static void le_hid_event(uint8_t type, uint16_t channel, uint8_t *packet, uint16_t size);
 
-static void le_open_hid(void)
+static void le_open_hid(slot_t *s)
 {
-	if (le_handle == HCI_CON_HANDLE_INVALID || hids_cid) return;
-	if (hids_host_connect(le_handle, le_hid_event, HID_PROTOCOL_MODE_REPORT, &hids_cid) != ERROR_CODE_SUCCESS) {
-		hids_cid = 0;
-		gap_disconnect(le_handle);
+	if (s->le_handle == HCI_CON_HANDLE_INVALID || s->hids_cid) return;
+	if (hids_host_connect(s->le_handle, le_hid_event, HID_PROTOCOL_MODE_REPORT, &s->hids_cid) != ERROR_CODE_SUCCESS) {
+		s->hids_cid = 0;
+		gap_disconnect(s->le_handle);
 	}
 }
 
-static void start_pairing(int i);
-
-static void le_disconnected(void)
+static void le_disconnected(slot_t *s)
 {
-	le_handle = HCI_CON_HANDLE_INVALID;
-	if (classic_after_le >= 0) {		/* the radio is free now: pair the new one */
+	s->le_handle = HCI_CON_HANDLE_INVALID;
+	s->hids_cid = 0;
+	let_go(s);
+	if (classic_after_le >= 0 && s == pairing_slot) {	/* the radio is free now: pair the new one */
 		int i = classic_after_le;
 		classic_after_le = -1;
-		hids_cid = 0;
-		release_all();
 		start_pairing(i);
 		return;
 	}
-	hids_cid = 0;
-	code[0] = 0;
-	release_all();
-	if (state == BTKBD_PAIRING) {
-		bool ok = paired && paired_le;		/* (saved once it had paired) */
-		pairing_with = -1;
-		idle_status();
-		set_status(ok ? "Paired: press a key on the keyboard" : "Pairing failed: pairing mode, then try again");
-	} else {
-		idle_status();
+	if (state == BTKBD_PAIRING && s == pairing_slot) {
+		code[0] = 0;
+		pairing_over(pair_saved ? (s == KBD ? "Paired: press a key on the keyboard" : "Paired: move the mouse")
+		                        : "Pairing failed: pairing mode, then try again");
+		return;
 	}
+	if (state == BTKBD_IDLE) idle_status();
 	le_wait();
 }
 
@@ -769,37 +891,57 @@ static void le_hid_event(uint8_t type, uint16_t channel, uint8_t *packet, uint16
 {
 	(void)type; (void)channel; (void)size;
 	if (hci_event_packet_get_type(packet) != HCI_EVENT_GATTSERVICE_META) return;
+	slot_t *s;
 	switch (hci_event_gattservice_meta_get_subevent_code(packet)) {
 	case GATTSERVICE_SUBEVENT_HID_SERVICE_CONNECTED:
+		s = slot_by_hids(gattservice_subevent_hid_service_connected_get_hids_cid(packet));
+		if (!s) break;
 		d_hid = gattservice_subevent_hid_service_connected_get_status(packet);
-		if (d_hid != ERROR_CODE_SUCCESS) { hids_cid = 0; gap_disconnect(le_handle); break; }
-		pairing_with = -1;
-		state = BTKBD_CONNECTED;
-		snprintf(status, sizeof status, "Connected: %.30s", paired_name[0] ? paired_name : "keyboard");
+		if (d_hid != ERROR_CODE_SUCCESS) { s->hids_cid = 0; gap_disconnect(s->le_handle); break; }
+		s->connected = true;
+		if (state == BTKBD_PAIRING && s == pairing_slot) pairing_over(NULL);
+		else if (state == BTKBD_IDLE) idle_status();
+		le_wait();			/* (for the other device, if it's BLE) */
 		break;
 	case GATTSERVICE_SUBEVENT_HID_REPORT:
-		if (gattservice_subevent_hid_report_get_hids_cid(packet) == hids_cid)
-			handle_le_report(gattservice_subevent_hid_report_get_service_index(packet),
+		s = slot_by_hids(gattservice_subevent_hid_report_get_hids_cid(packet));
+		if (s)
+			handle_le_report(s, gattservice_subevent_hid_report_get_service_index(packet),
 			                 gattservice_subevent_hid_report_get_report(packet),
 			                 gattservice_subevent_hid_report_get_report_len(packet));
 		break;
 	case GATTSERVICE_SUBEVENT_HID_SERVICE_DISCONNECTED:
-		hids_cid = 0;
+		s = slot_by_hids(gattservice_subevent_hid_service_disconnected_get_hids_cid(packet));
+		if (s) s->hids_cid = 0;
 		break;
 	}
 }
 
-static btstack_timer_source_t stall_timer;
-static hci_con_handle_t stall_handle;
+/* The paired device is connected and secure. It should open the HID
+   connection now (or let us open ours); the K380, now and then, does
+   neither, and sits there. If nothing has come of it in a few seconds,
+   hang up: on its next try it usually gets it right. */
 static void on_stall(btstack_timer_source_t *t)
 {
-	(void)t;
-	if (state == BTKBD_CONNECTED || paired_le) return;	/* (it made it) */
-	if (n_trace == TRACE) { memmove(trace, trace + 1, TRACE - 1); n_trace--; }
-	trace[n_trace++] = 0xBB;			/* (in the trace: BB, we hung up on a stall) */
-	if (cid) { hid_host_disconnect(cid); cid = 0; }
-	gap_disconnect(stall_handle);
-	set_status("Press a key on the keyboard again");
+	slot_t *s = btstack_run_loop_get_timer_context(t);
+	if (s->connected || s->le) return;	/* (it made it) */
+	trace_mark(0xBB);			/* (in the trace: BB, we hung up on a stall) */
+	if (s->cid) { hid_host_disconnect(s->cid); s->cid = 0; }
+	gap_disconnect(s->stall_handle);
+	set_status(s == KBD ? "Press a key on the keyboard again" : "Move the mouse again");
+}
+
+static void watch_for_stall(hci_con_handle_t h)
+{
+	hci_connection_t *c = hci_connection_for_handle(h);
+	slot_t *s = c ? slot_by_addr(c->address, false) : NULL;
+	if (!s || s->connected || state != BTKBD_IDLE) return;
+	s->stall_handle = h;
+	btstack_run_loop_remove_timer(&s->stall_timer);
+	btstack_run_loop_set_timer_handler(&s->stall_timer, on_stall);
+	btstack_run_loop_set_timer_context(&s->stall_timer, s);
+	btstack_run_loop_set_timer(&s->stall_timer, 4000);
+	btstack_run_loop_add_timer(&s->stall_timer);
 }
 
 static void packet_handler(uint8_t type, uint16_t channel, uint8_t *packet, uint16_t size)
@@ -807,30 +949,19 @@ static void packet_handler(uint8_t type, uint16_t channel, uint8_t *packet, uint
 	(void)channel; (void)size;
 	if (type != HCI_EVENT_PACKET) return;
 	bd_addr_t addr;
+	slot_t *s;
 	uint8_t ev = hci_event_packet_get_type(packet);
 	if (ev != HCI_EVENT_NUMBER_OF_COMPLETED_PACKETS && ev != HCI_EVENT_TRANSPORT_PACKET_SENT
 	    && ev != HCI_EVENT_COMMAND_COMPLETE && ev != HCI_EVENT_COMMAND_STATUS) {
 		last_event = ev;
-		uint8_t t = ev == HCI_EVENT_HID_META ? (uint8_t)(0xF0 | (hci_event_hid_meta_get_subevent_code(packet) & 0x0F)) : ev;
-		if (n_trace == TRACE) { memmove(trace, trace + 1, TRACE - 1); n_trace--; }
-		trace[n_trace++] = t;
+		trace_mark(ev == HCI_EVENT_HID_META ? (uint8_t)(0xF0 | (hci_event_hid_meta_get_subevent_code(packet) & 0x0F)) : ev);
 	}
 	switch (ev) {
 	case HCI_EVENT_CONNECTION_COMPLETE: d_conn = hci_event_connection_complete_get_status(packet); break;
 	case HCI_EVENT_DISCONNECTION_COMPLETE: d_disc = hci_event_disconnection_complete_get_reason(packet); break;
 	case HCI_EVENT_ENCRYPTION_CHANGE:
 		d_enc = hci_event_encryption_change_get_status(packet);
-		/* The paired keyboard is connected and secure. It should open the
-		   keyboard connection now (or let us open ours); the K380, now and
-		   then, does neither, and sits there. If nothing has come of it in
-		   a few seconds, hang up: on its next try it usually gets it right. */
-		if (d_enc == 0 && state == BTKBD_WAITING && paired && !paired_le) {
-			stall_handle = hci_event_encryption_change_get_connection_handle(packet);
-			btstack_run_loop_remove_timer(&stall_timer);
-			btstack_run_loop_set_timer_handler(&stall_timer, on_stall);
-			btstack_run_loop_set_timer(&stall_timer, 4000);
-			btstack_run_loop_add_timer(&stall_timer);
-		}
+		if (d_enc == 0) watch_for_stall(hci_event_encryption_change_get_connection_handle(packet));
 		break;
 	case HCI_EVENT_IO_CAPABILITY_RESPONSE: d_io = hci_event_io_capability_response_get_io_capability(packet); break;
 	default: break;
@@ -839,7 +970,8 @@ static void packet_handler(uint8_t type, uint16_t channel, uint8_t *packet, uint
 	case BTSTACK_EVENT_STATE:
 		if (btstack_event_state_get_state(packet) != HCI_STATE_WORKING) break;
 		idle_status();
-		try_paired();
+		try_paired(KBD);
+		if (!KBD->cid) try_paired(MOUSE);	/* (else on the next retry: one at a time) */
 		le_wait();
 		break;
 
@@ -850,9 +982,12 @@ static void packet_handler(uint8_t type, uint16_t channel, uint8_t *packet, uint
 		gap_event_inquiry_result_get_bd_addr(packet, addr);
 		for (int i = 0; i < n_found; i++) if (bd_addr_cmp(found[i].addr, addr) == 0) goto done;
 		int i = n_found++;
+		memset(&found[i], 0, sizeof found[i]);
 		bd_addr_copy(found[i].addr, addr);
 		found[i].psrm = gap_event_inquiry_result_get_page_scan_repetition_mode(packet);
 		found[i].clock = gap_event_inquiry_result_get_clock_offset(packet);
+		/* a keyboard (or one with a trackpad too), a mouse, or neither */
+		found[i].kind = (cod & 0xC0) == 0x80 ? BTKBD_MOUSE : (cod & 0x40) ? BTKBD_KEYBOARD : -1;
 		found[i].named = gap_event_inquiry_result_get_name_available(packet);
 		if (found[i].named) {
 			int n = gap_event_inquiry_result_get_name_len(packet);
@@ -879,8 +1014,8 @@ static void packet_handler(uint8_t type, uint16_t channel, uint8_t *packet, uint
 			le_connected(packet);
 		break;
 	case HCI_EVENT_DISCONNECTION_COMPLETE:
-		if (le_handle != HCI_CON_HANDLE_INVALID && hci_event_disconnection_complete_get_connection_handle(packet) == le_handle)
-			le_disconnected();
+		s = slot_by_le(hci_event_disconnection_complete_get_connection_handle(packet));
+		if (s) le_disconnected(s);
 		break;
 
 	/* BLE pairing (the Security Manager's events come here too) */
@@ -900,30 +1035,35 @@ static void packet_handler(uint8_t type, uint16_t channel, uint8_t *packet, uint
 		le_ident_known = true;
 		break;
 	case SM_EVENT_PAIRING_COMPLETE:
+		s = slot_by_le(sm_event_pairing_complete_get_handle(packet));
+		if (!s) break;
 		code[0] = 0;
 		d_pair = sm_event_pairing_complete_get_status(packet);
 		if (d_pair == ERROR_CODE_SUCCESS) {
-			if (state == BTKBD_PAIRING && pairing_with >= 0) {
-				if (le_ident_known) save_paired(le_ident, found[pairing_with].name, true, le_ident_type);
-				else save_paired(found[pairing_with].addr, found[pairing_with].name, true, found[pairing_with].type);
+			if (state == BTKBD_PAIRING && s == pairing_slot && pairing_with >= 0) {
+				if (le_ident_known) save_paired(s, le_ident, found[pairing_with].name, true, le_ident_type);
+				else save_paired(s, found[pairing_with].addr, found[pairing_with].name, true, found[pairing_with].type);
 			}
-			le_open_hid();
+			le_open_hid(s);
 		} else {
 			d_auth = sm_event_pairing_complete_get_reason(packet);
-			gap_disconnect(le_handle);
+			gap_disconnect(s->le_handle);
 		}
 		break;
 	case SM_EVENT_REENCRYPTION_COMPLETE:
+		s = slot_by_le(sm_event_reencryption_complete_get_handle(packet));
+		if (!s) break;
 		d_enc = sm_event_reencryption_complete_get_status(packet);
-		if (d_enc == ERROR_CODE_SUCCESS) le_open_hid();
-		else gap_disconnect(le_handle);		/* it has forgotten us: pair it again */
+		if (d_enc == ERROR_CODE_SUCCESS) le_open_hid(s);
+		else gap_disconnect(s->le_handle);	/* it has forgotten us: pair it again */
 		break;
 	case SM_EVENT_IDENTITY_RESOLVING_SUCCEEDED: {
 		bd_addr_t id, a;
 		sm_event_identity_resolving_succeeded_get_identity_address(packet, id);
-		if (le_mode != LE_WAITING || !paired_le || bd_addr_cmp(id, paired_addr) != 0) break;
+		s = slot_by_addr(id, true);
+		if (le_mode != LE_WAITING || !s || s->le_handle != HCI_CON_HANDLE_INVALID) break;
 		sm_event_identity_resolving_succeeded_get_address(packet, a);
-		le_connect(a, (bd_addr_type_t)sm_event_identity_resolving_succeeded_get_addr_type(packet));
+		le_connect(s, a, (bd_addr_type_t)sm_event_identity_resolving_succeeded_get_addr_type(packet));
 		break;
 	}
 	case HCI_EVENT_REMOTE_NAME_REQUEST_COMPLETE:
@@ -941,6 +1081,10 @@ static void packet_handler(uint8_t type, uint16_t channel, uint8_t *packet, uint
 	/* pairing */
 	case HCI_EVENT_PIN_CODE_REQUEST:		/* an older keyboard: type the PIN on it */
 		hci_event_pin_code_request_get_bd_addr(packet, addr);
+		if (state == BTKBD_PAIRING && pairing_slot == MOUSE) {
+			gap_pin_code_response(addr, "0000");	/* an older mouse: always this */
+			break;
+		}
 		snprintf(code, sizeof code, "%04u", (unsigned)(get_rand_32() % 10000));
 		gap_pin_code_response(addr, code);
 		set_status("Type the code on the keyboard");
@@ -963,67 +1107,76 @@ static void packet_handler(uint8_t type, uint16_t channel, uint8_t *packet, uint
 		/* paired: remember it now. Keyboards often hang up straight after
 		   pairing and then connect back by themselves, and that has to be
 		   let in. */
-		if (packet[2] == 0 && state == BTKBD_PAIRING && pairing_with >= 0)
-			save_paired(found[pairing_with].addr, found[pairing_with].name, false, 0);
+		if (packet[2] == 0 && state == BTKBD_PAIRING && pairing_with >= 0 && !found[pairing_with].le)
+			save_paired(pairing_slot, found[pairing_with].addr, found[pairing_with].name, false, 0);
 		break;
 
 	case HCI_EVENT_HID_META:
 		switch (hci_event_hid_meta_get_subevent_code(packet)) {
-		case HID_SUBEVENT_INCOMING_CONNECTION:
+		case HID_SUBEVENT_INCOMING_CONNECTION: {
 			hid_subevent_incoming_connection_get_address(packet, addr);
-			if ((paired && !paired_le && bd_addr_cmp(addr, paired_addr) == 0) || state == BTKBD_PAIRING)
-			{
-				hid_host_accept_connection(hid_subevent_incoming_connection_get_hid_cid(packet), HID_PROTOCOL_MODE_REPORT);
-				boot_mode = false;	/* (it opened the connection: its own layout, as usual) */
+			uint16_t c = hid_subevent_incoming_connection_get_hid_cid(packet);
+			s = slot_by_addr(addr, false);
+			if (!s && state == BTKBD_PAIRING) s = pairing_slot;
+			if (s) {
+				hid_host_accept_connection(c, HID_PROTOCOL_MODE_REPORT);
+				s->boot_mode = false;	/* (it opened the connection: its own layout, as usual) */
+			} else {
+				hid_host_decline_connection(c);
 			}
-			else
-				hid_host_decline_connection(hid_subevent_incoming_connection_get_hid_cid(packet));
 			break;
-		case HID_SUBEVENT_CONNECTION_OPENED:
+		}
+		case HID_SUBEVENT_CONNECTION_OPENED: {
+			uint16_t c = hid_subevent_connection_opened_get_hid_cid(packet);
+			hid_subevent_connection_opened_get_bd_addr(packet, addr);
+			s = slot_by_cid(c);
+			if (!s) s = slot_by_addr(addr, false);
+			if (!s && state == BTKBD_PAIRING) s = pairing_slot;
+			if (!s) break;
+			bool pairing = state == BTKBD_PAIRING && s == pairing_slot;
 			if (hid_subevent_connection_opened_get_status(packet) != ERROR_CODE_SUCCESS) {
 				/* (an attempt we gave up, as Forget does, ends here too: not ours now) */
-				if (hid_subevent_connection_opened_get_hid_cid(packet) != cid) break;
+				if (s->cid != c) break;
 				note_err("connect", hid_subevent_connection_opened_get_status(packet));
-				cid = 0;
+				s->cid = 0;
 				code[0] = 0;
-				if (state == BTKBD_PAIRING) {
-					bool ok = pairing_with >= 0 && paired && bd_addr_cmp(paired_addr, found[pairing_with].addr) == 0;
-					pairing_with = -1;
-					idle_status();
-					if (ok) {	/* paired, but not connected yet: it will come back, or we'll try again */
-						set_status("Paired: press a key on the keyboard");
+				if (pairing) {
+					if (pair_saved) {	/* paired, but not connected yet: it will come back, or we'll try again */
+						pairing_over(s == KBD ? "Paired: press a key on the keyboard" : "Paired: move the mouse");
 						btstack_run_loop_remove_timer(&retry_timer);
 						btstack_run_loop_set_timer(&retry_timer, 8000);	/* give it time to call back first */
 						btstack_run_loop_add_timer(&retry_timer);
 					} else {
-						set_status("Pairing failed: try again");
+						pairing_over("Pairing failed: try again");
 					}
 				}
 				break;
 			}
-			cid = hid_subevent_connection_opened_get_hid_cid(packet);
-			descriptor_ok = false;
+			s->cid = c;
+			s->descriptor_ok = false;
+			s->stuck = 0;
 			code[0] = 0;
-			if (state == BTKBD_PAIRING && pairing_with >= 0) {
-				hid_subevent_connection_opened_get_bd_addr(packet, addr);
-				save_paired(addr, found[pairing_with].name, false, 0);
-				pairing_with = -1;
-			}
-			state = BTKBD_CONNECTED;
-			snprintf(status, sizeof status, "Connected: %.30s", paired_name[0] ? paired_name : "keyboard");
+			if (pairing && pairing_with >= 0) save_paired(s, addr, found[pairing_with].name, false, 0);
+			s->connected = true;
+			if (pairing) pairing_over(NULL);
+			else if (state == BTKBD_IDLE) idle_status();
 			break;
+		}
 		case HID_SUBEVENT_DESCRIPTOR_AVAILABLE:
-			descriptor_ok = hid_subevent_descriptor_available_get_status(packet) == ERROR_CODE_SUCCESS;
+			s = slot_by_cid(hid_subevent_descriptor_available_get_hid_cid(packet));
+			if (s) s->descriptor_ok = hid_subevent_descriptor_available_get_status(packet) == ERROR_CODE_SUCCESS;
 			break;
 		case HID_SUBEVENT_REPORT:
-			if (hid_subevent_report_get_hid_cid(packet) == cid)
-				handle_report(hid_subevent_report_get_report(packet), hid_subevent_report_get_report_len(packet));
+			s = slot_by_cid(hid_subevent_report_get_hid_cid(packet));
+			if (s) handle_report(s, hid_subevent_report_get_report(packet), hid_subevent_report_get_report_len(packet));
 			break;
 		case HID_SUBEVENT_CONNECTION_CLOSED:
-			cid = 0;
-			descriptor_ok = false;
-			release_all();
-			idle_status();
+			s = slot_by_cid(hid_subevent_connection_closed_get_hid_cid(packet));
+			if (!s) break;
+			s->cid = 0;
+			s->descriptor_ok = false;
+			let_go(s);
+			if (state == BTKBD_IDLE) idle_status();
 			break;
 		}
 		break;
@@ -1083,7 +1236,7 @@ bool btkbd_init(void)
 	gap_ssp_set_io_capability(SSP_IO_CAPABILITY_DISPLAY_ONLY);
 	gap_ssp_set_authentication_requirement(SSP_IO_AUTHREQ_MITM_PROTECTION_REQUIRED_GENERAL_BONDING);
 	gap_set_bondable_mode(1);
-	gap_connectable_control(1);			/* so the keyboard can reconnect by itself */
+	gap_connectable_control(1);			/* so a device can reconnect by itself */
 	btstack_run_loop_set_timer_handler(&retry_timer, on_retry);
 	btstack_run_loop_set_timer(&retry_timer, RETRY_MS);
 	btstack_run_loop_add_timer(&retry_timer);
@@ -1107,9 +1260,16 @@ void btkbd_poll(void)
 	}
 }
 
-btkbd_state_t btkbd_state(void) { return state; }
+btkbd_state_t btkbd_device_state(btkbd_device_t d)
+{
+	if (state != BTKBD_IDLE) return state;
+	slot_t *s = &slots[d & 1];
+	return s->connected ? BTKBD_CONNECTED : s->paired ? BTKBD_WAITING : BTKBD_IDLE;
+}
+const char *btkbd_device_name(btkbd_device_t d) { slot_t *s = &slots[d & 1]; return s->paired ? s->name : ""; }
+btkbd_state_t btkbd_state(void) { return btkbd_device_state(BTKBD_KEYBOARD); }
 const char *btkbd_status(void) { return status; }
-const char *btkbd_name(void) { return paired ? paired_name : ""; }
+const char *btkbd_name(void) { return btkbd_device_name(BTKBD_KEYBOARD); }
 const char *btkbd_code(void) { return code[0] ? code : NULL; }
 
 void btkbd_search(void)
@@ -1131,11 +1291,13 @@ void btkbd_search(void)
 int btkbd_found(void) { return n_found; }
 const char *btkbd_found_name(int i) { return i >= 0 && i < n_found ? found[i].name : ""; }
 bool btkbd_found_le(int i) { return i >= 0 && i < n_found && found[i].le; }
+int btkbd_found_kind(int i) { return i >= 0 && i < n_found ? found[i].kind : -1; }
 
-void btkbd_pair(int i)
+void btkbd_pair_as(int i, btkbd_device_t d)
 {
 	if (i < 0 || i >= n_found || state == BTKBD_PAIRING) return;
 	lock();
+	pairing_slot = &slots[d & 1];
 	pair_tries = 0;
 	if (state == BTKBD_SEARCHING) {		/* finish the search first, then pair */
 		pair_after_search = i;
@@ -1145,6 +1307,11 @@ void btkbd_pair(int i)
 		start_pairing(i);
 	}
 	unlock();
+}
+
+void btkbd_pair(int i)
+{
+	btkbd_pair_as(i, btkbd_found_kind(i) == BTKBD_MOUSE ? BTKBD_MOUSE : BTKBD_KEYBOARD);
 }
 
 static void on_pair_again(btstack_timer_source_t *t)
@@ -1157,38 +1324,36 @@ static void on_pair_again(btstack_timer_source_t *t)
 
 static void start_pairing(int i)
 {
+	slot_t *s = pairing_slot;
 	reset_diag();
-	if (cid) { hid_host_disconnect(cid); cid = 0; }
+	pair_saved = false;
+	if (s->cid) { hid_host_disconnect(s->cid); s->cid = 0; let_go(s); }
 	le_stop();
 	pairing_with = i;
 	state = BTKBD_PAIRING;
 	snprintf(status, sizeof status, "Pairing with %.28s", found[i].name);
-	if (le_handle != HCI_CON_HANDLE_INVALID) {
-		/* a BLE keyboard is connected: let it go first (a new connection
+	if (s->le_handle != HCI_CON_HANDLE_INVALID) {
+		/* the old BLE one is connected: let it go first (a new connection
 		   can't start while it's being dropped); this goes on from
 		   le_disconnected() */
 		classic_after_le = i;
-		gap_disconnect(le_handle);
+		gap_disconnect(s->le_handle);
 		return;
 	}
 	if (found[i].le) {
 		gap_delete_bonding(found[i].type, found[i].addr);	/* start fresh */
 		le_ident_known = false;
-		le_connect(found[i].addr, found[i].type);
-		if (le_mode != LE_CONNECTING) {
-			pairing_with = -1;
-			idle_status();
-			set_status("Couldn't connect: try again");
-		}
+		le_connect(s, found[i].addr, found[i].type);
+		if (le_mode != LE_CONNECTING) pairing_over("Couldn't connect: try again");
 		return;
 	}
 	gap_drop_link_key_for_bd_addr(found[i].addr);	/* start fresh */
-	boot_mode = false;
-	uint8_t err = hid_host_connect(found[i].addr, HID_PROTOCOL_MODE_REPORT, &cid);
+	s->boot_mode = false;
+	uint8_t err = hid_host_connect(found[i].addr, HID_PROTOCOL_MODE_REPORT, &s->cid);
 	if (err == ERROR_CODE_COMMAND_DISALLOWED && pair_tries < 3) {
 		/* still connected to it from before (forgotten a moment ago, say):
 		   hang up, and try again when that's done */
-		cid = 0;
+		s->cid = 0;
 		pair_tries++;
 		hci_connection_t *c = hci_connection_for_bd_addr_and_type(found[i].addr, BD_ADDR_TYPE_ACL);
 		if (c) gap_disconnect(c->con_handle);
@@ -1202,25 +1367,27 @@ static void start_pairing(int i)
 	pair_tries = 0;
 	if (err != ERROR_CODE_SUCCESS) {
 		note_err("start", err);
-		cid = 0;
-		pairing_with = -1;
-		idle_status();
-		set_status("Couldn't connect: try again");
+		s->cid = 0;
+		pairing_over("Couldn't connect: try again");
 	}
 }
 
-void btkbd_forget(void)
+void btkbd_forget_device(btkbd_device_t d)
 {
+	slot_t *s = &slots[d & 1];
 	lock();
-	if (cid) { hid_host_disconnect(cid); cid = 0; }
-	le_stop();
-	if (le_handle != HCI_CON_HANDLE_INVALID) gap_disconnect(le_handle);
-	if (paired && !paired_le) gap_drop_link_key_for_bd_addr(paired_addr);
-	if (paired && paired_le) gap_delete_bonding(paired_type, paired_addr);
-	tlv_delete(NULL, BT_TAG_KEYBOARD);
-	tlv_delete(NULL, BT_TAG_KEYBOARD_LE);
-	paired = paired_le = false;
-	paired_name[0] = 0;
-	if (state != BTKBD_OFF && state != BTKBD_STARTING) idle_status();
+	if (s->cid) { hid_host_disconnect(s->cid); s->cid = 0; }
+	if (le_connecting == s || le_mode == LE_WAITING) le_stop();	/* (le_wait() starts again if the other wants it) */
+	if (s->le_handle != HCI_CON_HANDLE_INVALID) gap_disconnect(s->le_handle);	/* (le_disconnected() tidies up) */
+	if (s->paired && !s->le) gap_drop_link_key_for_bd_addr(s->addr);
+	if (s->paired && s->le) gap_delete_bonding(s->type, s->addr);
+	tlv_delete(NULL, s->tag);
+	tlv_delete(NULL, s->tag_le);
+	s->paired = s->le = false;
+	s->name[0] = 0;
+	let_go(s);
+	if (state == BTKBD_IDLE) { idle_status(); le_wait(); }
 	unlock();
 }
+
+void btkbd_forget(void) { btkbd_forget_device(BTKBD_KEYBOARD); }

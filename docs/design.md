@@ -1288,6 +1288,22 @@ board not yet):*
   `btkbd.c`, `btkbd.h` and `btstack_config.h` are the same as 1.2's, so
   nothing in them changed; 1.3 moved only `btpair` (mice, a longer
   message) and `bluetooth.cmake`.
+
+  *Updated 2026-11-02 to picocalc-extras' btpair 2.1 (`60ea870`).* `btkbd.c`
+  was rewritten there: the keyboard and a mouse are each a slot of their
+  own (`slot_t`: its pairing, its HID connection, its BLE handle), paired
+  and reconnected apart, with two more records in `pairing.dat`, `PTR0`
+  (a classic mouse) and `PTL0` (a BLE mouse), the file's size and layout as
+  before (1,604 bytes, `PBK2`). The shell's `btkbd.c` is that file with the
+  changes above made again, by a three-way merge of the old original, the
+  shell's and the new one; `bt_store_*` and the firmware's open and close
+  are the same, and `btstore.h` has the two new tags. A mouse paired in
+  `btpair` connects when the radio starts and its movement is counted
+  (`btkbd_mouse()`), but the shell reads none of it; without the slots a
+  classic mouse paging the PicoCalc would have been taken for the
+  keyboard. `bt` and `info` still speak of the keyboard only. The W
+  build is 2.1 KB larger (below). `btkbd.c`'s own storage code, now on
+  FatFs there too, is not used: `btstore.c` saves through `name.new`.
 - **`btkbd-test.uf2`** (`test/pico/btkbd_test.c`) is the check on the
   board: it starts Bluetooth from the card, says what it is doing as
   that changes, shows each key from the Bluetooth keyboard ("bt") and

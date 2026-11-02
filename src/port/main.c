@@ -38,6 +38,14 @@
 #include "southbridge.h"
 #include "term.h"
 #include "usbdisk.h"
+
+/* Set to 1 by CMake for the builds that have them (`info` says so). */
+#ifndef PICO_SHELL_BT
+#define PICO_SHELL_BT 0
+#endif
+#ifndef PICO_SHELL_HDMI
+#define PICO_SHELL_HDMI 0
+#endif
 #if PICO_SHELL_BT
 #include "btkbd.h"
 #include "btstore.h"
@@ -243,7 +251,9 @@ static void info(void *ctx, const out_t *o) {
     out_printf(o, "chip      %s rev %u, %lu MHz\n", g_board.chip, g_board.chip_version,
                (unsigned long)(g_board.clk_sys_hz / 1000000u));
     /* The build, which the user chose by its file (design.md §3.8). */
-    out_printf(o, "build     %s\n", SHELL_NTP ? "Pico 2 W, with NTP" : "Pico 2, without NTP");
+    /* and what the build has beyond that: BT, hdmi (design.md §3.10, §3.11) */
+    out_printf(o, "build     %s%s%s\n", SHELL_NTP ? "Pico 2 W, with NTP" : "Pico 2, without NTP",
+               PICO_SHELL_BT ? ", BT" : "", PICO_SHELL_HDMI ? ", hdmi" : "");
     out_printf(o, "id        %s\n", g_board.unique_id);
     out_printf(o, "memory    %lu KB of %lu KB SRAM\n",
                (unsigned long)(((uintptr_t)&__end__ - SRAM_BASE) >> 10),

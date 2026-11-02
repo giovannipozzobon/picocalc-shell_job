@@ -40,7 +40,8 @@ The same licence as this project, and the same owner (who confirmed on
 Copyright (c) 2026 Chris Torkildson, under the MIT licence, which is
 compatible with the GPL-3.0. Its Bluetooth keyboard (design.md §3.10). Checked
 against v1.3 (2026-10-31): the files taken are unchanged since v1.2, and
-the fix switches of v1.3's `bluetooth.cmake` are here.
+the fix switches of v1.3's `bluetooth.cmake` are here. `btkbd.c` and
+`btkbd.h` brought to btpair 2.1 (a keyboard and a mouse) on 2026-11-02.
 
 | Here | From picocalc-extras | Changes |
 |---|---|---|

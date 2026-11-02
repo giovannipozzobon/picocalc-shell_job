@@ -15,15 +15,18 @@
  * In the shell, kbd.c takes them from btkbd_read() into the ring the
  * southbridge's keys go in (design.md §3.10).
  *
+ * A Bluetooth mouse can be paired too, alongside the keyboard: btkbd_mouse()
+ * gives its movement. (A keyboard's own trackpad comes out of it as well.)
+ *
  * Both kinds of keyboard work: "classic" Bluetooth ones, and Bluetooth Low
  * Energy (BLE) ones, which speak HID over GATT.
  *
  * Bluetooth runs in the background. Pairing is done with the btpair
  * program; other programs only reconnect, and needn't call btkbd_poll().
  *
- * The pairing is kept on the SD card, in /bluetooth/pairing.dat (btstore.h),
- * so every program that uses this finds the same keyboard. The radio's
- * firmware is read from /bluetooth/cyw43-fw.bin (cyw43_fw.h).
+ * The pairings are kept on the SD card, in /bluetooth/pairing.dat (btstore.h),
+ * so every program that uses this finds the same keyboard and mouse. The
+ * radio's firmware is read from /bluetooth/cyw43-fw.bin (cyw43_fw.h).
  *
  *     files_mount();
  *     btkbd_init();   // false, with btkbd_status() saying why, if the
@@ -46,6 +49,8 @@ typedef enum {
 	BTKBD_CONNECTED,
 } btkbd_state_t;
 
+typedef enum { BTKBD_KEYBOARD, BTKBD_MOUSE } btkbd_device_t;
+
 /* start the radio; reconnects to the keyboard paired before, if any */
 bool btkbd_init(void);
 /* save a new pairing to the card: call it now and then while pairing */
@@ -53,18 +58,29 @@ void btkbd_poll(void);
 /* the next key event from the Bluetooth keyboard alone, or 0 */
 uint16_t btkbd_read(void);
 
-btkbd_state_t btkbd_state(void);
+btkbd_state_t btkbd_state(void);		/* the keyboard's */
 /* a short line saying what's happening, for the screen */
 const char *btkbd_status(void);
 /* the name of the paired keyboard, or "" */
 const char *btkbd_name(void);
+/* the same for either: OFF, STARTING, SEARCHING and PAIRING are for both */
+btkbd_state_t btkbd_device_state(btkbd_device_t d);
+const char *btkbd_device_name(btkbd_device_t d);
 
-/* pairing: search for keyboards in pairing mode (about 10 seconds) */
+/* the mouse (or a keyboard's trackpad): how far it has moved since the last
+   call, and the buttons held now (bit 0 left, 1 right, 2 middle); true if
+   anything changed */
+bool btkbd_mouse(int *dx, int *dy, int *wheel, int *buttons);
+
+/* pairing: search for keyboards and mice in pairing mode (about 10 seconds) */
 void btkbd_search(void);
 int btkbd_found(void);			/* how many found so far */
 const char *btkbd_found_name(int i);
-bool btkbd_found_le(int i);		/* a Bluetooth Low Energy keyboard */
-void btkbd_pair(int i);
+bool btkbd_found_le(int i);		/* a Bluetooth Low Energy one */
+int btkbd_found_kind(int i);		/* what it says it is: BTKBD_KEYBOARD, BTKBD_MOUSE, or -1 */
+/* pair it as the keyboard or the mouse, replacing the one before */
+void btkbd_pair_as(int i, btkbd_device_t d);
+void btkbd_pair(int i);			/* as what it says it is (a keyboard if it doesn't say) */
 /* while pairing: what to type on the keyboard (then Enter), or NULL */
 const char *btkbd_code(void);
 /* a line of details for testing */
@@ -75,10 +91,11 @@ const char *btkbd_smp(int i);	/* BLE pairing and L2CAP signalling messages, 0-9:
 /* built with BTKBD_LOG: every Bluetooth packet since starting, in PacketLogger
    format (Wireshark reads it), and how many didn't fit; otherwise none */
 const uint8_t *btkbd_log(size_t *len, uint32_t *lost);
-/* a trackpad or mouse on the keyboard, for testing: how many reports have
-   come, the movement added up since the start, and the buttons held now */
+/* for testing: how many mouse reports have come, the movement added up
+   since the start, and the buttons held now */
 void btkbd_pointer(unsigned *reports, int *x, int *y, int *wheel, int *buttons);
-/* forget the paired keyboard */
+/* forget the paired keyboard, or either */
 void btkbd_forget(void);
+void btkbd_forget_device(btkbd_device_t d);
 
 #endif

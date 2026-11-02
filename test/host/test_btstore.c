@@ -22,6 +22,21 @@ static int test_records(void) {
     static const uint8_t key[16] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 };
 
     CHECK(bt_store_get(&st, 0x11, NULL, 0) == 0, "none there");
+
+    /* A keyboard and a mouse, each its own record (btpair 2.1), the
+     * classic and the BLE ones, and the one's removal leaves the other. */
+    static const uint8_t pair[7] = { 1, 2, 3, 4, 5, 6, 'M' };
+    CHECK(bt_store_put(&st, BT_TAG_KEYBOARD, pair, 7) == 0 && bt_store_put(&st, BT_TAG_MOUSE, pair, 7) == 0 &&
+              bt_store_put(&st, BT_TAG_MOUSE_LE, pair, 7) == 0,
+          "keyboard and mouse records");
+    CHECK(bt_store_find(&st, BT_TAG_KEYBOARD) != bt_store_find(&st, BT_TAG_MOUSE) &&
+              bt_store_find(&st, BT_TAG_MOUSE) != bt_store_find(&st, BT_TAG_MOUSE_LE),
+          "three records");
+    CHECK(bt_store_delete(&st, BT_TAG_MOUSE) && bt_store_get(&st, BT_TAG_KEYBOARD, NULL, 0) == 7 &&
+              bt_store_get(&st, BT_TAG_MOUSE, NULL, 0) == 0 && bt_store_get(&st, BT_TAG_MOUSE_LE, NULL, 0) == 7,
+          "forgetting the mouse leaves the keyboard");
+    bt_store_delete(&st, BT_TAG_KEYBOARD);
+    bt_store_delete(&st, BT_TAG_MOUSE_LE);
     CHECK(bt_store_put(&st, 0x11, key, sizeof key) == 0, "put");
     uint8_t got[32] = { 0 };
     CHECK(bt_store_get(&st, 0x11, got, sizeof got) == 16 && memcmp(got, key, 16) == 0, "get");
@@ -128,6 +143,9 @@ static int file_tests(bool fat32) {
           "%s: the file is btpair's layout", kind);
     CHECK(BT_STORE_MAGIC == 0x324B4250u && memcmp("PBK2", &(uint32_t){ BT_STORE_MAGIC }, 4) == 0, "magic");
     CHECK(memcmp(&(uint32_t){ BT_TAG_KEYBOARD }, "0DBK", 4) == 0, "KBD0 on the card");
+    /* btpair 2.1 also keeps a mouse: "PTR0" and "PTL0". */
+    CHECK(memcmp(&(uint32_t){ BT_TAG_MOUSE }, "0RTP", 4) == 0, "PTR0 on the card");
+    CHECK(memcmp(&(uint32_t){ BT_TAG_MOUSE_LE }, "0LTP", 4) == 0, "PTL0 on the card");
 
     /* A file btpair wrote: read, with a BLE record. */
     memset(raw, 0, sizeof raw);

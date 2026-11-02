@@ -6,7 +6,8 @@
  * and 20 tagged records of up to 72 bytes, held whole in RAM and saved
  * whole, always 1,604 bytes, little-endian as the RP2350 and the host
  * keep their structures. BTstack keeps its link keys and BLE bondings in
- * the records, by tag, and btkbd.c its note of which keyboard is ours.
+ * the records, by tag, and btkbd.c its note of which keyboard and which
+ * mouse are ours.
  *
  * Portable: FatFs's API only (fat.h), with no BTstack in it, so the host
  * tests it. A save goes through `pairing.dat.new` as the shell's other
@@ -26,6 +27,8 @@
 /* btkbd.c's own records: the paired keyboard's address and name. */
 #define BT_TAG_KEYBOARD    0x4B424430u   /* "KBD0": a classic keyboard */
 #define BT_TAG_KEYBOARD_LE 0x4B424C30u   /* "KBL0": a BLE keyboard, its address type, name */
+#define BT_TAG_MOUSE       0x50545230u   /* "PTR0": a classic mouse, the same way */
+#define BT_TAG_MOUSE_LE    0x50544C30u   /* "PTL0": a BLE mouse */
 
 typedef struct {
     uint32_t tag;       /* 0: the record is free */
