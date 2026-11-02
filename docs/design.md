@@ -1,6 +1,6 @@
 # PicoCalc Shell — design
 
-Status: **Draft 14, 2026-10-30.** M13 (§3.9, steps 1-3) and M14 (§3.10) are done ([milestones.md](milestones.md)). Feasibility study and first design. M0
+Status: **Draft 15, 2026-11-01.** M15 (§3.11, an HDMI mirror) is done: the owner saw it work on the board. M13 (§3.9, steps 1-3) and M14 (§3.10) are done ([milestones.md](milestones.md)). Feasibility study and first design. M0
 (the skeleton), M1 (files), M2 (run), M3 (vi), M4 (comfort), M6 (USB
 speed), M8 (the rest of v1), M9 (the DOS flavour) and M11 (menus) are done
 ([milestones.md](milestones.md)). There is no M5: *Exit to shell* in the
@@ -49,6 +49,7 @@ only open questions are M10's, a flash filesystem for programs to share
 | 2026-10-25 | Under M7, only a power-on gives the shell with no command; a program's `watchdog_reboot()` with no command restarts it, as under the stock loader. A restart loop is broken by holding Up/F1/F5 through the restart, which stage3 watches for after draining the FIFO, or by a power cycle. The commands in the watchdog's scratch registers stay stock 2.5's, so the shell and programs run the same under either loader (the owner). A RAM program restarts itself with `BOOT_RAM` and its own 8.3 path; its loop is broken only by a power cycle, since a command skips the watch for a key. | 10 |
 | 2026-10-30 | M13, a web file manager (§3.9): a RAM program, `web.uf2`, run by the W build's `web` builtin, as `ntp.uf2` is; it is a client of the network `/ntp/ntp.cfg` names, with no access point and no authentication for now; a file for the network alone may replace `ntp.cfg`'s later; its page is in English; its code and API come from PicoMultiLoader (the owner's, GPL-3.0). | 3.9, 10 |
 | 2026-10-30 | M14, a Bluetooth keyboard in the shell (§3.10): it goes in the existing Pico 2 W builds, not a third build; the Pico 2 W first; the BTstack licence is no obstacle (the owner); pairing is done by picocalc-extras' `btpair`, which is not rebuilt here, and the shell only reconnects, from `/bluetooth/pairing.dat`. | 3.10, 10 |
+| 2026-11-01 | M15, an HDMI mirror (§3.11): the owner's `pico_tang20k_hdmi` link (a Tang Nano 20K on J703) is a build option, `PICO_SHELL_HDMI`, not a third build or a default; the `hdmi` command is the owner's, resending the state and, here, redrawing the screen; the FPGA side is left as it is. It takes GP2-GP5, so it excludes the dev build's UART and the DS3231. | 3.11, 10 |
 | 2026-10-25 | M7's patched stage3 is built once for each size of flash, 4, 8 and 16 MB, each the Pico 2's board with only the flash size changed, since its partition table is fixed when it is built (the owner). | 10 |
 
 References: **HW §N** is [hardware-notes.md](hardware-notes.md). **EL §N** is
@@ -1382,6 +1383,70 @@ and the async context) does not disturb the card, the panel's DMA or
 `usbdisk`; that a keyboard connects after a program and back (the
 connection is lost at each reboot); the battery's cost with the radio on;
 and that a Pico 2 with the W build fails cleanly.
+
+### 3.11 An HDMI mirror (M15)
+
+*Proposed 2026-11-01 (the owner).* The panel can be copied to a Tang Nano
+20K on the PicoCalc's J703 header, whose FPGA scales the 320x320 picture
+to 1280x720 HDMI. The FPGA's gateware and the wiring are the owner's
+project, `pico_tang20k_hdmi`, and are not here. This is the Pico's side
+of it: its `drivers/mirror.[ch]`, `mirror.pio` and `hdmi` command, from the
+owner's copy of `picocalc-text-starter`, in the shell's own `lcd.c`.
+The link and its measured limits are in hardware-notes.md §8.7.
+
+**What it does.** Every command, parameter and pixel `lcd.c` sends the
+panel it also sends over a one-way 4-bit QSPI link (GP2-GP5 data, GP21
+clock, GP28 chip select) at 15 MHz, in packets the FPGA decodes as an
+ST7365P subset: command, data, and a control packet that resets its
+decoder. Pixels go by a second DMA channel into a PIO state machine, in
+parallel with the panel's own DMA. The FPGA keeps the frame memory of 480
+rows, with the same hardware scroll, so nothing in `screen.c` knows of it.
+
+**A build option.** `-DPICO_SHELL_HDMI=ON` (release-style, with
+`-DPICO_SHELL_UART=OFF`; CMake stops otherwise) builds it into either
+flavour and either board, in its own directory (`build/pico-hdmi`, ...).
+Without it every call is a no-op and the shell is as it was. It is not on
+by default: the copy costs time at every redraw (below), and the pins are
+a PicoCalc's PSRAM pins, which a user with no FPGA should not be driving.
+
+**Pins, and what they exclude.** GP2 and GP3 are the dev build's UART:
+the build option refuses that build. GP4 and GP5 are the DS3231's `i2c0`
+(§3.8): with the mirror there is no bus, `ds3231.c` answers "absent" and
+the clock is the AON timer's, as with no DS3231 fitted. GP20, the PSRAM's
+chip select, is held high. The PIO and its state machine are taken wherever
+one is free (the CYW43 driver takes one in the W builds); one DMA channel
+is claimed beside the panel's channel 0.
+
+**The command.** `hdmi` (`HDMI`) has no arguments. It resends the FPGA a
+reset and the panel's state (orientation, inversion, the scroll band and
+offset, display on: `lcd_mirror_resync()`), and the next flush draws every
+row again (`screen_repaint()`), since the resync carries no picture; and
+it says `HDMI mirror on, QSPI 15000 kHz`. It is for an FPGA that came up
+after the PicoCalc, or a cable moved. In a build without the mirror it says
+`not on this machine`, as `bt` does on a Pico 2. The owner's `linktest`,
+`lcdbench` and `hdmipat` are not brought over.
+
+**Where it differs from the starter.** The starter wraps every LCD call
+in a disabled-interrupt section, because its cursor timer draws from an
+interrupt; the shell draws from thread context only (lcd.h), so a packet
+is cut only by an interrupt, which pauses SCK and which the FPGA waits
+out. `lcd_dma_wait()` waits for the mirror's copy of a row as well as the
+panel's, since it is slower (4 bits at 15 MHz against 1 bit at 75 MHz) and
+the caller refills the buffer when it returns. `lcd_fill()` sends one
+pixel `w*h` times, so the mirror has a fill with the read address held
+(`mirror_data16_fill`). The packets are one per row, as the starter sends
+them; a packet for a whole blit would cost less and has not been tried.
+
+**Known cost** (from the owner's project, at 15 MHz, on its starter: not
+measured in the shell): redrawing costs +11.7% for a strip of pixels and
++44% for one glyph. The shell redraws only changed cells.
+
+**To check on the board:** the picture and its colours against the panel
+at the prompt, in vi, scrolling past the frame memory's wrap, at power-on
+with the FPGA already up, and with it powered after (`hdmi`); the time a
+screenful and `ls` of a long directory take with and without the mirror;
+that `usbdisk`, `web` and a program run and back still work; and that a
+DOS-flavour and a W build both come up.
 
 ## 4. The shell
 
@@ -2967,4 +3032,14 @@ in [milestones.md](milestones.md).
      vi, back from a program, `usbdisk` and the panel with the radio on,
      battery, and a Pico 2.
   6. *Built 2026-10-30:* the `bt` builtin, `info`, the guides,
+     `THIRD-PARTY.md`, milestones.md.
+- **M15 — An HDMI mirror (proposed 2026-11-01, §3.11).** In steps:
+  1. *Built 2026-11-01:* `src/port/mirror.[ch]` and `mirror.pio` from the
+     owner's project, the hooks in `lcd.c`, `lcd_mirror_resync()`,
+     `screen_repaint()`, `hdmi`/`HDMI`, the `PICO_SHELL_HDMI` option, and
+     a host test of the command in both flavours.
+  2. *Done 2026-11-02, by the owner:* the mirror works on the board (a
+     black screen first, from the DMA claim order, fixed); the checks at
+     the end of §3.11 were not confirmed one by one.
+  3. *Built 2026-11-01:* the guides, hardware-notes.md §8.7,
      `THIRD-PARTY.md`, milestones.md.

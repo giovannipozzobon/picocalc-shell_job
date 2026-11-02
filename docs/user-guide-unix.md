@@ -449,6 +449,7 @@ have it every time.
 | `ntp [-f]` | in the Pico 2 W build: sets the clock from the network, once each power-on; `-f` tries again |
 | `web` | in the Pico 2 W build: manages the card from a browser, over Wi-Fi, until Esc |
 | `bt` | in the Pico 2 W build: what the Bluetooth keyboard is doing |
+| `hdmi` | in a build made for it: sends the screen to the HDMI mirror again |
 
 `date`:
 
@@ -586,6 +587,21 @@ timeout  = 20                   # seconds to join and get the time, 5 to 60
 - The radio takes some of the processor's time: `usbdisk` reads about a
   fifth slower with it on (writing is as fast). On a Pico 2 there is no
   radio and no `bt`.
+
+`hdmi`:
+
+- A shell built with `-DPICO_SHELL_HDMI=ON` (a build of your own, with
+  `-DPICO_SHELL_UART=OFF`) copies everything it draws to a Tang Nano 20K
+  on the PicoCalc's J703 header, which shows the screen on HDMI. The
+  gateware and the wiring are the project `pico_tang20k_hdmi`'s. In any
+  other build `hdmi` says `hdmi: not on this machine`.
+- Power the FPGA before the PicoCalc and nothing more is needed. If it
+  came up later, or a cable moved, type `hdmi`: the shell sends the FPGA
+  the screen's state again, draws every row again, and says
+  `HDMI mirror on, QSPI 15000 kHz`.
+- The copy takes some time at each redraw. The link uses GP2 to GP5,
+  GP20, GP21 and GP28, so a build with it has no DS3231 clock chip (GP4
+  and GP5), and the clock is lost at power-off as with none fitted.
 
 `battery`:
 

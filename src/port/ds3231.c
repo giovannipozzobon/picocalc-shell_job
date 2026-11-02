@@ -42,7 +42,13 @@ static ds3231_status_t status(int rc, size_t want) {
     return rc == PICO_ERROR_TIMEOUT ? DS3231_TIMEOUT : DS3231_ABSENT;
 }
 
+/* With the HDMI mirror (PICO_SHELL_HDMI) GP4 and GP5 are two of its data
+ * lines: there is no bus here, and nothing answers (design.md §3.11). */
 static ds3231_status_t get(uint8_t reg, uint8_t *in, size_t n) {
+#if PICO_SHELL_HDMI
+    (void)reg; (void)in; (void)n;
+    return DS3231_ABSENT;
+#endif
     ds3231_status_t st =
         status(i2c_write_timeout_us(RTC_I2C, RTC_ADDR, &reg, 1, true, RTC_TIMEOUT_US), 1);
     if (st == DS3231_OK)
@@ -51,10 +57,17 @@ static ds3231_status_t get(uint8_t reg, uint8_t *in, size_t n) {
 }
 
 static ds3231_status_t put(const uint8_t *out, size_t n) {
+#if PICO_SHELL_HDMI
+    (void)out; (void)n;
+    return DS3231_ABSENT;
+#endif
     return status(i2c_write_timeout_us(RTC_I2C, RTC_ADDR, out, n, false, RTC_TIMEOUT_US), n);
 }
 
 void ds3231_init(void) {
+#if PICO_SHELL_HDMI
+    return;
+#endif
     i2c_init(RTC_I2C, RTC_HZ);
     gpio_set_function(RTC_PIN_SDA, GPIO_FUNC_I2C);
     gpio_set_function(RTC_PIN_SCL, GPIO_FUNC_I2C);

@@ -18,6 +18,11 @@ void screen_init(void);
  * and restarts its blink. */
 void screen_flush(term_t *t, uint64_t now_us);
 
+/* Draw every row again at the next flush, whether or not the shadow says
+ * it is drawn: for a display that missed what was drawn (the HDMI mirror
+ * after lcd_mirror_resync(), which sends no picture). */
+void screen_repaint(term_t *t);
+
 /* The cursor's blink, 500 ms on and 500 ms off, as the starter's. Call
  * from the main loop. */
 void screen_tick(term_t *t, uint64_t now_us);

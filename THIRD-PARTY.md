@@ -61,6 +61,20 @@ Blair Leduc, under the MIT licence, which is compatible with the GPL-3.0.
 | `src/port/screen.c` | `drivers/lcd.c` | its glyph drawing, bold, underline and cursor, over the emulators' `lcd.c` |
 | `src/core/keycodes.h` | `drivers/keyboard.h` | the key code table only |
 
+## pico_tang20k_hdmi — the owner's
+
+The owner's project for an HDMI mirror of the panel on a Tang Nano 20K; its
+Pico side is a copy of `picocalc-text-starter` (MIT, above) with the link
+added. Only the Pico side is used here (design.md §3.11); the FPGA's
+gateware is not.
+
+| Here | From pico_tang20k_hdmi | Changes |
+|---|---|---|
+| `src/port/mirror.pio` | `firmware/picocalc-text-starter/drivers/mirror.pio` | none |
+| `src/port/mirror.c`, `mirror.h` | `drivers/mirror.c`, `mirror.h` | comments in English; a PIO and state machine taken wherever one is free; a fill with the read address held; the link test, the pause and the clock change left out |
+| the calls in `src/port/lcd.c`, `lcd_mirror_resync()` | `drivers/lcd.c`'s `mirror_*` calls and `lcd_mirror_resync()` | put where the shell's `lcd.c` sends commands and pixels; the state replayed is the shell's |
+| the `hdmi` command | `commands.c`'s `hdmi()` | a builtin in both flavours; it also redraws the screen |
+
 ## Pico Logo — MIT, the owner's
 
 Copyright (c) 2025-2026 Blair Leduc, under the MIT licence, which is

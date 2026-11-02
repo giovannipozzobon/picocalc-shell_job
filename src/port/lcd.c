@@ -12,6 +12,11 @@
  * (hardware-notes.md §4.4, §11: record the revision used). That driver
  * runs the panel at 18 bpp; the pixel format and entry mode here are the
  * RGB565 pair hardware-notes.md §4.4 records as known-working instead.
+ *
+ * With PICO_SHELL_HDMI every command, parameter and pixel sent here is also
+ * sent to mirror.c, which copies it to an FPGA for HDMI (design.md §3.11).
+ * The calls are where pico_tang20k_hdmi's lcd.c has them; without it they
+ * are nothing.
  */
 
 #include "lcd.h"
@@ -24,6 +29,7 @@
 #include "pico/stdlib.h"
 
 #include "config.h"
+#include "mirror.h"
 
 /* hardware-notes.md §1.1. CS, D/CX and RST are plain GPIOs: the SPI
  * peripheral does not manage chip select here, and that matters (§4.3). */
@@ -59,6 +65,8 @@
 #define CMD_VSCSAD  0x37
 #define CMD_COLMOD  0x3A
 
+#define MADCTL_VALUE 0x48   /* MX | BGR (§4.4) */
+
 static dma_channel_config s_dma_cfg;
 static bool s_dma_busy;
 static unsigned s_scroll;   /* frame memory row at panel row 0 */
@@ -78,6 +86,8 @@ static void lcd_cmd(uint8_t cmd, const uint8_t *data, size_t n) {
         spi_write_blocking(LCD_SPI, data, n);
     }
     gpio_put(LCD_PIN_CS, 1);
+    mirror_cmd(cmd);
+    if (n) mirror_data(data, n);
 }
 
 #define LCD_CMD(c, ...)                                                   \
@@ -108,6 +118,9 @@ static void lcd_pixels_begin(void) {
 }
 
 static void lcd_dma_wait(void) {
+    /* The mirror's copy of the row is slower than the panel's, and the
+     * caller refills the buffer the moment this returns: wait for both. */
+    mirror_wait();
     if (s_dma_busy) {
         /* Polled, not an interrupt: the next row is useful work to do
          * while waiting, and the audio engine owns its DMA IRQ
@@ -134,6 +147,8 @@ static void lcd_dma_start(const uint16_t *src, uint32_t count, bool read_inc) {
     dma_channel_configure(LCD_DMA_CH, &s_dma_cfg,
                           &spi_get_hw(LCD_SPI)->dr, src, count, true);
     s_dma_busy = true;
+    if (read_inc) mirror_data16_start(src, count);
+    else mirror_data16_fill(src, count);
 }
 
 /* ---- public ------------------------------------------------------------ */
@@ -163,6 +178,11 @@ uint32_t lcd_init(void) {
     channel_config_set_dreq(&s_dma_cfg, spi_get_dreq(LCD_SPI, true));
     channel_config_set_write_increment(&s_dma_cfg, false);
 
+    /* After the claim above: the mirror takes the first free channel, which
+     * would be this one, and claiming it twice stops the program. Nothing
+     * unless built with PICO_SHELL_HDMI. */
+    mirror_init();
+
     /* Hardware reset: low for at least 10 us, 120 ms after release, then
      * software reset (hardware-notes.md §4.4). The 120 ms after SWRESET is
      * longer than the 5 ms minimum; it is the controller's own wait
@@ -183,7 +203,7 @@ uint32_t lcd_init(void) {
     LCD_CMD(0xC0, 0x17, 0x15);                  /* power control 1        */
     LCD_CMD(0xC1, 0x41);                        /* power control 2        */
     LCD_CMD(0xC5, 0x00, 0x12, 0x80);            /* VCOM                   */
-    LCD_CMD(CMD_MADCTL, 0x48);                  /* MX | BGR (§4.4)        */
+    LCD_CMD(CMD_MADCTL, MADCTL_VALUE);            /* (§4.4)                 */
     LCD_CMD(CMD_COLMOD, 0x55);                  /* RGB565 (§4.4)          */
     LCD_CMD(0xB0, 0x00);                        /* interface mode         */
     LCD_CMD(0xB1, 0xA0);                        /* frame rate             */
@@ -251,4 +271,25 @@ void lcd_blit_row(const uint16_t *px, unsigned n) {
 
 void lcd_blit_end(void) {
     lcd_pixels_end();
+}
+
+/* CTRL 0x01 puts the FPGA's decoder back to its power-on values, but the
+ * panel keeps its own, so what was sent to the panel is sent again: the
+ * orientation, the inversion, the scroll band and offset, and display on.
+ * They are the ones lcd_init sets, with the offset as it is now. The
+ * picture is not sent: the caller redraws it. */
+void lcd_mirror_resync(void) {
+    if (!mirror_active()) return;
+    mirror_ctrl_resync();
+    uint8_t madctl[1] = { MADCTL_VALUE };
+    uint8_t band[6] = { 0x00, 0x00, SHELL_PANEL_MEM_H >> 8, SHELL_PANEL_MEM_H & 0xFF, 0x00, 0x00 };
+    uint8_t start[2] = { (uint8_t)(s_scroll >> 8), (uint8_t)s_scroll };
+    mirror_cmd(CMD_MADCTL);
+    mirror_data(madctl, 1);
+    mirror_cmd(CMD_INVON);
+    mirror_cmd(CMD_VSCRDEF);
+    mirror_data(band, 6);
+    mirror_cmd(CMD_VSCSAD);
+    mirror_data(start, 2);
+    mirror_cmd(CMD_DISPON);
 }

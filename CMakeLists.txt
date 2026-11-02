@@ -205,6 +205,15 @@ else()
         set(PICO_SHELL_UART_ON 0)
     endif()
 
+    # PICO_SHELL_HDMI=ON copies the panel to a Tang Nano 20K on J703, which
+    # shows it on HDMI (design.md §3.11). The link takes GP2-GP5, GP20, GP21
+    # and GP28, so it cannot be built with the UART on GP2/GP3, and it
+    # leaves no DS3231 on GP4/GP5. OFF, the default, the shell is as it was.
+    option(PICO_SHELL_HDMI "Mirror the panel to an FPGA on J703, for HDMI" OFF)
+    if (PICO_SHELL_HDMI AND PICO_SHELL_UART)
+        message(FATAL_ERROR "shell: PICO_SHELL_HDMI needs -DPICO_SHELL_UART=OFF: GP2 and GP3 are the link's")
+    endif()
+
     # The panel's SPI rate: 75 MHz, the owner's decision after M0's
     # measurements (design.md §4.1; hardware-notes.md §4.2, §4.7).
     # 25000000 is the conservative fallback. A build directory configured
@@ -280,6 +289,12 @@ else()
         target_sources(shell PRIVATE src/port/cyw43_fw.c)
         target_compile_definitions(shell PRIVATE PICO_SHELL_BT=1)
         target_link_libraries(shell shell_btkbd cyw43_fw_stream)
+    endif()
+    if (PICO_SHELL_HDMI)
+        target_sources(shell PRIVATE src/port/mirror.c)
+        pico_generate_pio_header(shell ${CMAKE_CURRENT_LIST_DIR}/src/port/mirror.pio)
+        target_compile_definitions(shell PRIVATE PICO_SHELL_HDMI=1)
+        target_link_libraries(shell hardware_pio)
     endif()
     pico_enable_stdio_uart(shell ${PICO_SHELL_UART_ON})
     pico_enable_stdio_usb(shell 0)

@@ -16,6 +16,47 @@ Each entry gives:
 - a **not checked** list, carried forward until something checks each item
   or a decision drops it.
 
+## M15 — An HDMI mirror (2026-11-01, branch `m15-hdmi`)
+
+**Built 2026-11-01; the owner ran it on the board 2026-11-02 and the
+mirror works** (design.md §3.11), after the fix below. The
+Pico's side of the owner's `pico_tang20k_hdmi` is in the shell as a build
+option, `-DPICO_SHELL_HDMI=ON`: `src/port/mirror.[ch]` and `mirror.pio`,
+the calls in `lcd.c`, `lcd_mirror_resync()`, `screen_repaint()`, and the
+`hdmi` (`HDMI`) builtin, which resends the screen's state and redraws.
+The FPGA's side was left as it is.
+
+**Checked on the host.** `hdmi` in both flavours (`test_ntp`): not on
+this machine without a mirror, the line the port gives, no arguments,
+`man`/`HELP`; the builtin lists and the 40-column widths (`test_system`,
+`test_dos`). All 33 host tests pass.
+
+**Firmware builds**, all with `-Wall -Wextra -Werror`, no warnings:
+Pico 2 release UNIX 450,924 B without the mirror, 452,572 B with it
+(+1,648 B); DOS with it 437,248 B; Pico 2 W release 492,620 B without,
+493,744 B with (+1,124 B, 30,544 B free). CMake stops a build with the
+mirror and the UART on GP2/GP3.
+
+**Found on the board, 2026-11-02 (the owner):** the first build gave a
+black screen and no shell. `lcd_init` called `mirror_init()`, which takes
+the first free DMA channel (0), before it claimed channel 0 for the panel
+itself, and claiming a channel twice stops the program. Fixed by calling
+`mirror_init()` after the panel's claim. Not reproduced here: the probe was
+not connected, and no test on the host reaches `lcd.c`.
+
+**Checked on the board, 2026-11-02 (the owner):** the HDMI mirror shows
+the screen. The owner reported no more than that it works: the list below
+was not confirmed one by one.
+
+**Not confirmed.** The picture and colours against
+the panel, scrolling past the frame memory's wrap, vi, the FPGA powered
+after the PicoCalc and `hdmi`, the cost of a redraw with the mirror (the
+owner's figures, +11.7% and +44%, are from its own starter), `usbdisk`,
+`web` and a program run and back, and the W and DOS builds coming up.
+`linktest`, `lcdbench` and `hdmipat` of the owner's project were not
+brought over. The mirror's one-packet-per-row copy is as the starter's;
+a packet for a whole blit has not been tried.
+
 ## M14 — A Bluetooth keyboard (2026-10-30, branch `m14-bluetooth`)
 
 **Done 2026-10-30 for a classic keyboard in the W builds** (design.md

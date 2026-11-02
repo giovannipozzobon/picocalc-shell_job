@@ -30,6 +30,7 @@
 #include "keys.h"
 #include "lcd.h"
 #include "loader.h"
+#include "mirror.h"
 #include "screen.h"
 #include "sd.h"
 #include "shell.h"
@@ -219,6 +220,20 @@ static const char *bluetooth(void *ctx) {
     case BTKBD_IDLE:      snprintf(line, sizeof line, "no keyboard paired"); break;
     default:              snprintf(line, sizeof line, "%s", btkbd_status()); break;
     }
+    return line;
+}
+#endif
+
+#if PICO_SHELL_HDMI
+/* `hdmi`: the FPGA is told the panel's state again, and the next flush
+ * draws every row again, since the FPGA gets no picture from the resync. */
+static const char *hdmi(void *ctx) {
+    (void)ctx;
+    static char line[40];
+    if (!mirror_active()) return "no mirror: no free PIO";
+    lcd_mirror_resync();
+    screen_repaint(&g_term);
+    snprintf(line, sizeof line, "HDMI mirror on, QSPI %lu kHz", (unsigned long)(mirror_hz() / 1000u));
     return line;
 }
 #endif
@@ -447,10 +462,12 @@ int main(void) {
     const shell_hooks_t hooks = { now_us, interrupted, getkey, pollkey, usbdisk, NULL };
     shell_init(&g_shell, &out, &hooks, SHELL_VERSION);
     shell_set_loader(&g_shell, &g_loader);
+    shell_system_t sys = { battery, backlight, phosphor, info, power, NULL, NULL, NULL };
 #if PICO_SHELL_BT
-    const shell_system_t sys = { battery, backlight, phosphor, info, power, NULL, bluetooth };
-#else
-    const shell_system_t sys = { battery, backlight, phosphor, info, power, NULL, NULL };
+    sys.bluetooth = bluetooth;
+#endif
+#if PICO_SHELL_HDMI
+    sys.hdmi = hdmi;
 #endif
     shell_set_system(&g_shell, &sys);
     const shell_clock_t clock = { clock_get, clock_set, NULL, clock_note, clock_ntp, clock_ntp_keep,

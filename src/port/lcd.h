@@ -55,4 +55,10 @@ void lcd_blit_begin(unsigned x, unsigned y, unsigned w, unsigned h);
 void lcd_blit_row(const uint16_t *px, unsigned n);
 void lcd_blit_end(void);
 
+/* Send the FPGA that mirrors the panel (mirror.h) the panel's state again:
+ * a reset, the orientation, inversion, scroll and display on. For a link
+ * the FPGA joined late. It sends no picture, so redraw afterwards.
+ * Nothing in a build without PICO_SHELL_HDMI. */
+void lcd_mirror_resync(void);
+
 #endif /* SHELL_LCD_H */

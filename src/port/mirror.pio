@@ -1,0 +1,18 @@
+;
+; mirror.pio -- one-way QSPI, Pico -> FPGA (mirror.h).
+;
+; From pico_tang20k_hdmi's firmware/picocalc-text-starter/drivers/mirror.pio
+; (the owner's), unchanged.
+;
+; 4 data bits on GP2..GP5 (out), the clock on GP21 (side-set). Two
+; instructions per SCK cycle: the data change while SCK falls and the FPGA
+; samples on the rising edge. Shift left (MSB first) with autopull: the high
+; nibble goes first. With the FIFO empty OUT stalls with SCK low.
+;
+.program mirror_qspi
+.side_set 1
+
+.wrap_target
+    out pins, 4 side 0
+    nop         side 1
+.wrap

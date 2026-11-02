@@ -64,6 +64,10 @@ typedef struct {
     /* A line saying what Bluetooth is doing, for `bt` and `info`
      * (design.md §3.10); NULL where there is none: the Pico 2 build. */
     const char *(*bluetooth)(void *ctx);
+    /* Send the HDMI mirror the screen's state and picture again, and say
+     * in a line what the link is (design.md §3.11); NULL where the build
+     * has no mirror. */
+    const char *(*hdmi)(void *ctx);
 } shell_system_t;
 
 /* The port's clock (clock.h; design.md §3.8): UTC in milliseconds since

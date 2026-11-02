@@ -130,6 +130,7 @@ const shell_builtin_t flavour_builtins[] = {
     { "echo",       cmd_echo,       "echo [-n] [word...]", "Print words; -n no line break" },
     { "export",     cmd_export,     "export [NAME=value...]", "Displays, sets or lists variables" },
     { "grep",       cmd_grep,       "grep [-v] [-n] [-c] [-i] pattern [file...]", "File pattern searcher" },
+    { "hdmi",       cmd_hdmi,       "hdmi", "Resends the screen to HDMI" },
     { "head",       cmd_head,       "head [-n N] [file...]", "Displays the first lines of a file" },
     { "history",    cmd_history,    "history", "Displays the lines typed" },
     { "info",       cmd_info,       "info", "Displays diagnostic information" },

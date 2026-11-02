@@ -283,6 +283,21 @@ int cmd_bt(shell_t *sh, int argc, char **argv) {
     return 0;
 }
 
+/* ---- hdmi ------------------------------------------------------------- */
+
+/* The FPGA that shows the screen on HDMI is told the panel's state again
+ * and the whole screen is redrawn, for a link that was not there when
+ * the shell drew it: the FPGA powered after the PicoCalc, or a cable
+ * moved. The port does it; this says what it found (design.md §3.11). */
+int cmd_hdmi(shell_t *sh, int argc, char **argv) {
+    (void)argv;
+    const char *name = SHELL_DOS ? "HDMI" : "hdmi";
+    if (argc != 1) return usage(sh, name);
+    if (!sh->sys.hdmi) return not_here(sh, name);
+    out_printf(&sh->out, "%s\n", sh->sys.hdmi(sh->sys.ctx));
+    return 0;
+}
+
 /* ---- date ------------------------------------------------------------- */
 
 static void date_show(shell_t *sh, const clock_tm_t *tm) {

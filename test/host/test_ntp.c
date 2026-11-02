@@ -395,6 +395,39 @@ static int test_bt(void) {
     return 0;
 }
 
+/* `hdmi` (design.md §3.11): the port resends the screen and says what the link is. */
+static int hdmi_calls;
+
+static const char *fake_hdmi(void *ctx) {
+    (void)ctx;
+    hdmi_calls++;
+    return "HDMI mirror on, QSPI 15000 kHz";
+}
+
+static int test_hdmi(void) {
+    const char *name = SHELL_DOS ? "HDMI" : "hdmi";
+    char want[96];
+
+    /* No mirror in the build: the usual builds. */
+    CHECK(run(name) == 1 && strstr(con, "not on this machine") && hdmi_calls == 0, "no mirror: '%s'", con);
+
+    shell_system_t sys = { 0 };
+    sys.hdmi = fake_hdmi;
+    shell_set_system(&sh, &sys);
+    CHECK(run(name) == 0 && strcmp(con, "HDMI mirror on, QSPI 15000 kHz\n") == 0 && hdmi_calls == 1,
+          "resent: '%s'", con);
+    CHECK(run(name) == 0 && hdmi_calls == 2, "again");
+    CHECK(strlen("HDMI mirror on, QSPI 15000 kHz") < 40, "fits 40 columns");
+
+    snprintf(want, sizeof want, "usage: %s\n", name);
+    CHECK(run(SHELL_DOS ? "HDMI x" : "hdmi x") == 1 && strcmp(con, want) == 0 && hdmi_calls == 2,
+          "usage: '%s'", con);
+    CHECK(run(SHELL_DOS ? "HELP HDMI" : "man hdmi") == 0 && strstr(con, "HDMI"), "help: '%s'", con);
+    memset(&sys, 0, sizeof sys);
+    shell_set_system(&sh, &sys);
+    return 0;
+}
+
 int main(void) {
     if (test_parse()) return 1;
     CHECK(host_disk_create(NULL, 32u << 20, false), "image");
@@ -405,5 +438,6 @@ int main(void) {
     if (test_builtin()) return 1;
     if (test_web()) return 1;
     if (test_bt()) return 1;
+    if (test_hdmi()) return 1;
     TEST_DONE();
 }

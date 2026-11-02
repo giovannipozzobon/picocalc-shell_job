@@ -289,6 +289,7 @@ const shell_builtin_t flavour_builtins[] = {
     { "FIND",      dos_find,      "FIND [/V] [/C] [/N] [/I] \"text\" [file...]", "Print the lines that contain text" },
     { "FOR",       dos_control,   "FOR %x IN (set) DO command", "Runs a command for each file in a set" },
     { "GOTO",      dos_goto,      "GOTO label", "Jumps to a label in a batch file" },
+    { "HDMI",      cmd_hdmi,      "HDMI", "Resends the screen to HDMI" },
     { "HELP",      cmd_help,      "HELP [command]", "Provides help information" },
     { "IF",        dos_control,   "IF [NOT] EXIST f|ERRORLEVEL n|a==b command", "Performs conditional processing" },
     { "INFO",      cmd_info,      "INFO", "Diagnostic information" },

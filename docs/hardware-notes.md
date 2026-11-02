@@ -1633,6 +1633,36 @@ its GP23-25 and GP29 does there (the owner has no Pico 2; the Plus 2 is
 the nearest board checked); WPA3-only networks, which the WPA2-AES join
 does not support.
 
+### 8.7 A copy of the panel to a Tang Nano 20K, on J703
+
+From the owner's project `pico_tang20k_hdmi` (its README and
+`docs/PicoCalc_HDMI_Mirror.md`; its measurements, not made here). The
+PicoCalc's J703 header carries the pins of the PSRAM chip, which the
+board does not need when its PSRAM is unused:
+
+| J703 | GP | Signal |
+|---:|---:|---|
+| 2-5 | GP2-GP5 | D0-D3, a nibble per clock, high nibble first |
+| 6 | GP21 | SCK |
+| 7 | GP28 | CS_N, low for a packet |
+| 8 | — | GND |
+| 1 | — | 3V3_OUT, **not connected** |
+
+GP20 is the PSRAM's chip select, not on J703, and is held high. A packet
+is a type byte, `0x00` command, `0x01` data or `0x80` control, and its
+bytes; the data are the panel's own, RGB565 high byte first. The FPGA
+decodes CASET, RASET, RAMWR, VSCRDEF, VSCSAD, INVOFF/ON and DISPOFF/ON;
+the data of a command go on across packets; control `0x01` resets it.
+
+On loose wires with no series resistors and slow edges at 2 mA, 1 MiB went
+over with no errors at 1, 5, 10 and 15 MHz (SCK up to about 15 MHz with
+the FPGA's glitch filter set to 3) and failed at 20 MHz. Copying costs time at
+each redraw: +11.7% for a strip of pixels and +44.3% for a glyph, at
+15 MHz, in that project's starter. An FPGA that is powered after the
+Pico has missed what was drawn: the state is sent again and the picture
+is redrawn. GP4 and GP5 are the DS3231's `i2c0` (§8.5), so the two do not
+share a board; GP2 and GP3 are the debug UART's (§1.1).
+
 ---
 
 ## 9. Making it fast

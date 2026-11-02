@@ -141,7 +141,7 @@ int main(void) {
           "info, no port: '%s'", con);
     CHECK(run("phosphor") == 0 && strcmp(con, "default\n") == 0, "phosphor: '%s'", con);
 
-    const shell_system_t sys = { battery, backlight, phosphor, info, power, NULL, NULL };
+    const shell_system_t sys = { battery, backlight, phosphor, info, power, NULL, NULL, NULL };
     shell_set_system(&sh, &sys);
 
     /* ---- man ---- */

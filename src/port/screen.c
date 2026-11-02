@@ -76,6 +76,11 @@ void screen_init(void) {
     s_cursor_shown = false;
 }
 
+void screen_repaint(term_t *t) {
+    memset(s_valid, 0, sizeof s_valid);
+    t->dirty = (uint32_t)((1ull << TERM_ROWS) - 1u);
+}
+
 static void flush(term_t *t) {
     int scroll;
     uint32_t dirty = term_take(t, &scroll);
