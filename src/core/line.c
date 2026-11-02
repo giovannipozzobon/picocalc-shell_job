@@ -370,10 +370,12 @@ bool line_key(shell_t *sh, int key) {
         erase(sh, l->pos, l->len - l->pos);
         break;
     case KEY_UP:
+    case KEY_WHEEL_UP:
     case 0x10:
         history_move(sh, -1);
         break;
     case KEY_DOWN:
+    case KEY_WHEEL_DOWN:
     case 0x0E:
         history_move(sh, +1);
         break;

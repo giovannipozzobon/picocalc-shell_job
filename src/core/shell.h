@@ -107,6 +107,7 @@ typedef struct shell {
     bool          out_is_con;
     input_t       in;               /* a command's input: a file, a pipe, or none */
     bool          stop;             /* interrupted: the rest of the line is dropped */
+    int           wheel_left;       /* Up (+) or Down (-) keys left of a wheel notch (shell_getkey) */
     int           status;           /* the last command's, kept across lines */
     unsigned      depth;            /* 0 at the prompt, one more in each `sh` */
     bool          at_bol;           /* the terminal's cursor is at a line's start */
@@ -163,6 +164,11 @@ void shell_error(shell_t *sh, const char *fmt, ...) __attribute__((format(printf
 /* For builtins: true once Break, Esc or Ctrl-C is pressed, and from then
  * on for the rest of the line. */
 bool shell_interrupted(shell_t *sh);
+
+/* The next key for an editor: hooks.getkey, with a notch of the mouse's
+ * wheel (KEY_WHEEL_UP, KEY_WHEEL_DOWN) turned into SHELL_WHEEL_LINES of
+ * Up or Down. */
+int shell_getkey(shell_t *sh);
 
 /* Whether `name` is a builtin, and which, -1 if none; and the i-th
  * builtin's name, NULL past the last, for Tab completion and `help`. */

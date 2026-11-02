@@ -771,7 +771,7 @@ static int edit(shell_t *sh, const char *arg, bool readonly) {
 
     for (;;) {
         draw();
-        int key = sh->hooks.getkey(sh->hooks.ctx);
+        int key = shell_getkey(sh);
         if (key < 0 || key == KEY_BREAK) break;   /* the end of input, or Brk: leave as :q! */
         if (key == 0x1B) key = KEY_ESC;
         ed.msg = NULL;

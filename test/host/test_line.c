@@ -200,6 +200,11 @@ int main(void) {
     CHECK(strcmp(row(0), "/home>ec") == 0 && AT(0, 8), "the typed line back: '%s'", row(0));
     key(KEY_DOWN);
     CHECK(strcmp(row(0), "/home>ec") == 0, "Down past it does nothing");
+    /* The mouse's wheel is a step of the history a notch. */
+    key(KEY_WHEEL_UP);
+    CHECK(strcmp(row(0), "/home>echo second") == 0, "wheel forward: '%s'", row(0));
+    key(KEY_WHEEL_DOWN);
+    CHECK(strcmp(row(0), "/home>ec") == 0, "wheel back: '%s'", row(0));
     key(0x10);   /* Ctrl-P */
     type(" again\r");
     CHECK(strcmp(row(1), "second again") == 0, "an edited recall runs: '%s'", row(1));

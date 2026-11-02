@@ -82,6 +82,14 @@ For the first word, Tab completes a command: a builtin, or a program in
 - Names are expanded as stored on the SD Card, with `\` before a
   space or any special character.
 
+### The mouse's wheel
+
+In the Pico 2 W build, a Bluetooth mouse paired with `btpair` has its wheel
+work as the arrow keys: at the prompt a notch is a step of the history,
+and in the editor (vi or EDIT) the cursor goes three lines, up for a notch
+forward. In `more` a notch back shows three rows more. The mouse's
+movement and buttons are not used yet.
+
 ### The PicoCalc's own keys
 
 Alt+`,`, Alt+`.`, Alt+Space and Alt+B are used by the PicoCalc for the

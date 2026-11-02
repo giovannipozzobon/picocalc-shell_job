@@ -415,6 +415,24 @@ static void log_banner(bool clocks_ok, uint32_t i2c_hz, sb_status_t sb, const ui
 }
 
 #if PICO_SHELL_BT
+/* What Bluetooth gives the key ring: the mouse's wheel as KEY_WHEEL_UP and
+ * KEY_WHEEL_DOWN presses (design.md §3.12), then the keyboard's keys. The
+ * mouse's movement and buttons are read and dropped until the shell uses
+ * them. */
+static uint16_t bt_source(void) {
+    static int notches;   /* the wheel's, not yet sent: forward is positive */
+    if (!notches) {
+        int dx, dy, wheel, buttons;
+        if (btkbd_mouse(&dx, &dy, &wheel, &buttons)) notches = wheel;
+    }
+    if (notches) {
+        uint8_t code = notches > 0 ? KEY_WHEEL_UP : KEY_WHEEL_DOWN;
+        notches += notches > 0 ? -1 : 1;
+        return (uint16_t)(KEY_STATE_PRESSED << 8 | code);
+    }
+    return btkbd_read();
+}
+
 /* Start the radio for the keyboard paired with btpair, after the prompt is
  * up. Only with /bluetooth/pairing.dat on the card: a person who has
  * paired a keyboard asked for it, and without one the radio is never
@@ -428,7 +446,7 @@ static void bt_start(void) {
 #endif
     if (btkbd_init()) {
         s_bt_on = true;
-        kbd_set_source(btkbd_read);
+        kbd_set_source(bt_source);
 #if PICO_SHELL_UART
         printf("bluetooth: started in %llu ms\n", (unsigned long long)((time_us_64() - t0) / 1000u));
 #endif

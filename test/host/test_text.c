@@ -119,6 +119,12 @@ int main(void) {
           "one more: '%s'", row(&shots[2], 30));
     /* q: stopped, the prompt row cleared, nothing more shown. */
     CHECK(!strstr(con, "line 64") && strcmp(row(&t, 31), "") == 0, "q: '%s'", row(&t, 31));
+    /* The mouse's wheel: forward cannot go back and is ignored, and a notch
+     * back is SHELL_WHEEL_LINES rows more. */
+    CHECK(run_keys("more n100", "\xda\xdbq") == 0 && waits == 3, "wheel: %u waits", waits);
+    CHECK(strcmp(row(&shots[1], 30), "line 31") == 0 && strcmp(row(&shots[2], 30), "line 34") == 0 &&
+              strcmp(row(&shots[2], 27), "line 31") == 0,
+          "wheel rows: '%s' '%s'", row(&shots[1], 30), row(&shots[2], 30));
     /* Each way to stop. */
     const char *stops[] = { "Q", "\x1b", "\x03", "\xd0" };
     for (size_t i = 0; i < 4; i++)

@@ -42,6 +42,13 @@
 
 #define KEY_CAPS_LOCK       0xC1
 
+/* The mouse's wheel, one notch each: the shell's own codes, which the
+ * southbridge never sends (design.md §3.12). Forward, away from the user,
+ * is UP. At the prompt they are Up and Down; in a pager, vi and EDIT
+ * they are WHEEL_LINES of them (shell_getkey()). */
+#define KEY_WHEEL_UP        0xDA
+#define KEY_WHEEL_DOWN      0xDB
+
 #define KEY_F1              0x81
 #define KEY_F2              0x82
 #define KEY_F3              0x83

@@ -305,6 +305,13 @@ static int screen_tests(void) {
               shot.col == 0,
           "and back: '%s'", row(0));
 
+    /* The mouse's wheel moves the cursor SHELL_WHEEL_LINES lines a notch,
+     * forward (up) or back. */
+    CHECK(put("/w8", "1\n2\n3\n4\n5\n6\n7\n8\n") && edit("vi /w8", "\xdb") == 0 && shot.row == 3,
+          "wheel back: row %u", shot.row);
+    CHECK(edit("vi /w8", "\xdb\xdb\xda") == 0 && shot.row == 3, "and forward: row %u", shot.row);
+    CHECK(edit("vi /w8", "\xda") == 0 && shot.row == 0, "forward at the top stays: row %u", shot.row);
+
     /* Visual mode reverses the selection. */
     CHECK(edit("vi /s", "vl") == 0 && reversed(0, 0) && reversed(0, 1) && !reversed(0, 2),
           "v: two characters reversed");

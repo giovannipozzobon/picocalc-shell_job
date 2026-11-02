@@ -1,6 +1,6 @@
 # PicoCalc Shell — design
 
-Status: **Draft 15, 2026-11-01.** M15 (§3.11, an HDMI mirror) is done: the owner saw it work on the board. M13 (§3.9, steps 1-3) and M14 (§3.10) are done ([milestones.md](milestones.md)). Feasibility study and first design. M0
+Status: **Draft 16, 2026-11-02.** M16 (§3.12, the mouse in the shell) has its first step, the wheel, built. M15 (§3.11, an HDMI mirror) is done: the owner saw it work on the board. M13 (§3.9, steps 1-3) and M14 (§3.10) are done ([milestones.md](milestones.md)). Feasibility study and first design. M0
 (the skeleton), M1 (files), M2 (run), M3 (vi), M4 (comfort), M6 (USB
 speed), M8 (the rest of v1), M9 (the DOS flavour) and M11 (menus) are done
 ([milestones.md](milestones.md)). There is no M5: *Exit to shell* in the
@@ -50,6 +50,7 @@ only open questions are M10's, a flash filesystem for programs to share
 | 2026-10-30 | M13, a web file manager (§3.9): a RAM program, `web.uf2`, run by the W build's `web` builtin, as `ntp.uf2` is; it is a client of the network `/ntp/ntp.cfg` names, with no access point and no authentication for now; a file for the network alone may replace `ntp.cfg`'s later; its page is in English; its code and API come from PicoMultiLoader (the owner's, GPL-3.0). | 3.9, 10 |
 | 2026-10-30 | M14, a Bluetooth keyboard in the shell (§3.10): it goes in the existing Pico 2 W builds, not a third build; the Pico 2 W first; the BTstack licence is no obstacle (the owner); pairing is done by picocalc-extras' `btpair`, which is not rebuilt here, and the shell only reconnects, from `/bluetooth/pairing.dat`. | 3.10, 10 |
 | 2026-11-01 | M15, an HDMI mirror (§3.11): the owner's `pico_tang20k_hdmi` link (a Tang Nano 20K on J703) is a build option, `PICO_SHELL_HDMI`, not a third build or a default; the `hdmi` command is the owner's, resending the state and, here, redrawing the screen; the FPGA side is left as it is. It takes GP2-GP5, so it excludes the dev build's UART and the DS3231. | 3.11, 10 |
+| 2026-11-02 | M16, the mouse in the shell (§3.12): what `mouse-test` showed, by the owner: the pointer's gain is 0.5 pixel a count and there is **no acceleration**; the wheel's forward (positive) is Up. Steps: the wheel first, then a pointer on the screen and clicks. | 3.12, 10 |
 | 2026-10-25 | M7's patched stage3 is built once for each size of flash, 4, 8 and 16 MB, each the Pico 2's board with only the flash size changed, since its partition table is fixed when it is built (the owner). | 10 |
 
 References: **HW §N** is [hardware-notes.md](hardware-notes.md). **EL §N** is
@@ -1304,6 +1305,17 @@ board not yet):*
   keyboard. `bt` and `info` still speak of the keyboard only. The W
   build is 2.1 KB larger (below). `btkbd.c`'s own storage code, now on
   FatFs there too, is not used: `btstore.c` saves through `name.new`.
+- **`mouse-test.uf2`** (`test/pico/mouse_test.c`, 2026-11-02) is the check
+  on the board for the mouse, before the shell uses it: a RAM program in
+  three pages, Tab between them. A shows the numbers (each device's state
+  and name, the last `btkbd_mouse()` poll, the totals, the reports a
+  second, the most in a poll); B an arrow on the panel in pixels, with
+  marks left by clicks, a bar for the wheel and a grid; C the pointer as a
+  cell of the 40x32 grid in reverse video, a list to click and scroll,
+  and the status line giving the cell. `+`/`-` set the gain (counts to
+  pixels), `a` the acceleration, `c` clears. It is built to settle what the
+  shell's mouse should do (gain, acceleration, the wheel's direction, the
+  cell mapping) before the shell gets any.
 - **`btkbd-test.uf2`** (`test/pico/btkbd_test.c`) is the check on the
   board: it starts Bluetooth from the card, says what it is doing as
   that changes, shows each key from the Bluetooth keyboard ("bt") and
@@ -1463,6 +1475,53 @@ with the FPGA already up, and with it powered after (`hdmi`); the time a
 screenful and `ls` of a long directory take with and without the mirror;
 that `usbdisk`, `web` and a program run and back still work; and that a
 DOS-flavour and a W build both come up.
+
+### 3.12 The mouse in the shell (M16)
+
+*Proposed 2026-11-02 (the owner).* `btkbd.c` already gives the mouse paired
+with `btpair` 2.1 (§3.10): `btkbd_mouse()` returns the movement in counts
+since its last call, the wheel's notches and the buttons held. The shell
+reads it and drops it. M16 gives it uses, in steps, each shown to the
+owner before the next.
+
+**What `mouse-test.uf2` settled** (the owner, 2026-11-02, a Bluetooth
+mouse on a Pico 2 W; §3.10 describes the program): the pointer is smooth;
+**a gain of 0.5 pixel a count, with no acceleration** is right; the
+wheel's notch forward (positive) is Up, and the list in the test moved the
+way it should; the three buttons are what the colours said. The program
+keeps the gains from 0.12 to 4 and an acceleration switch to try others;
+the shell has neither, so the settled one is a constant.
+
+**Step 1, the wheel (built 2026-11-02).** Two key codes of the shell's own
+(`keycodes.h`, `KEY_WHEEL_UP` 0xDA and `KEY_WHEEL_DOWN` 0xDB, which the
+southbridge never sends), one for each notch. In the port, `bt_source()`
+(`main.c`) is `kbd_set_source`'s source: it reads `btkbd_mouse()`, drops
+the movement and the buttons, and gives the wheel's notches to the key
+ring as presses, then the Bluetooth keyboard's keys as before. The
+terminal's *alternate scroll* does the same: the wheel is the arrow keys
+when no program takes the mouse. The readers:
+
+- **The prompt** (`line.c`): a notch is a step of the history, Up or Down.
+- **vi and EDIT** (`vi.c`, `edit.c`, by `shell_getkey()`): a notch is
+  `SHELL_WHEEL_LINES` (3) of Up or Down, so the cursor goes three lines.
+  In EDIT's menus the same Up and Down move the choice.
+- **`more` and `MORE`** (`text.c`): back (down) is three rows more, and
+  forward, which cannot go back, is ignored.
+- Any other reader of keys gets a code it does not know and ignores it.
+
+**Next, not built.** A pointer on the screen: a cell of the 40x32 grid
+in reverse video, drawn in `screen.c` over the shadow as the text cursor
+is, shown when the mouse moves and hidden when a key is typed, at 0.5
+pixel a count. Then the buttons: a click that puts the cursor where it is
+in the line being typed, in vi and in EDIT, and that chooses in a menu.
+Both need the position of the reader's text on the grid, which today only
+`term.c` knows, and so a design of its own. Selecting and copying text with
+the mouse is further still.
+
+**To check on the board:** the wheel at the prompt (the history), in `more`
+of a long file, in vi and in EDIT (three lines a notch, the view following
+the cursor); that a mouse with the keyboard both connected does not lose a
+key; and that without a mouse nothing changes.
 
 ## 4. The shell
 
@@ -3059,3 +3118,14 @@ in [milestones.md](milestones.md).
      the end of §3.11 were not confirmed one by one.
   3. *Built 2026-11-01:* the guides, hardware-notes.md §8.7,
      `THIRD-PARTY.md`, milestones.md.
+- **M16 — The mouse in the shell (proposed 2026-11-02, §3.12).** In steps:
+  1. *Built 2026-11-02, checked by the owner on the board (the history and
+     vi; `more`, EDIT and a mouse with a keyboard not confirmed):* the wheel, as `KEY_WHEEL_UP`
+     and `KEY_WHEEL_DOWN`, read by the prompt, vi, EDIT and `more`; host
+     tests of each (`test_keys`, `test_line`, `test_text`, `test_vi`,
+     `test_edit`, with a planted change to `SHELL_WHEEL_LINES` caught by
+     five of them).
+  2. *To do:* a pointer on the screen, a cell in reverse video, at 0.5
+     pixel a count and with no acceleration (the owner's).
+  3. *To do:* clicks: in the line being typed, in vi and EDIT, and in the
+     menus.

@@ -23,6 +23,10 @@ int main(void) {
     CHECK(keys_event(&k, KEY_STATE_PRESSED, KEY_MOD_SHL) == KEYS_NONE, "Shift alone types nothing");
     CHECK(keys_event(&k, KEY_STATE_PRESSED, KEY_UP) == KEY_UP, "arrows pass as their codes");
     CHECK(keys_event(&k, KEY_STATE_PRESSED, KEY_BREAK) == KEY_BREAK, "Break");
+    /* The mouse's wheel, as bt_source() presses it. */
+    CHECK(keys_event(&k, KEY_STATE_PRESSED, KEY_WHEEL_UP) == KEY_WHEEL_UP &&
+              keys_event(&k, KEY_STATE_PRESSED, KEY_WHEEL_DOWN) == KEY_WHEEL_DOWN,
+          "the wheel passes as its codes");
 
     /* Ctrl arrives as its own event beside the key (§6.3). */
     CHECK(keys_event(&k, KEY_STATE_PRESSED, KEY_MOD_CTRL) == KEYS_NONE, "Ctrl alone");

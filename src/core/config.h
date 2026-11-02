@@ -115,6 +115,11 @@
  * (hardware-notes.md §6.1), a power of two. */
 #define SHELL_KEY_RING     64u
 
+/* Lines a notch of the mouse's wheel moves in vi, EDIT and a pager
+ * (keycodes.h; design.md §3.12). At the prompt a notch is one step of the
+ * history. */
+#define SHELL_WHEEL_LINES  3
+
 /* vi (design.md §4.6, vi.c). The file is held whole in one buffer, its
  * NUL included, so a file of up to VI_BUF_SIZE - 1 bytes opens and a
  * larger one is refused. The copy buffer is the one register; a yank

@@ -32,7 +32,9 @@ static void flush(shell_t *sh, pager_t *pg) {
 static bool wait(shell_t *sh, pager_t *pg) {
     flush(sh, pg);
     out_puts(&sh->con, "\033[7m--More--\033[0m");
-    int key = sh->hooks.getkey(sh->hooks.ctx);
+    int key;
+    do key = sh->hooks.getkey(sh->hooks.ctx);
+    while (key == KEY_WHEEL_UP);   /* the wheel cannot go back */
     out_puts(&sh->con, "\r\033[K");
     pg->row = 0;
     pg->page = TERM_ROWS - 1u;
@@ -47,6 +49,9 @@ static bool wait(shell_t *sh, pager_t *pg) {
     case '\r':
     case KEY_DOWN:
         pg->page = 1;
+        return true;
+    case KEY_WHEEL_DOWN:
+        pg->page = SHELL_WHEEL_LINES;
         return true;
     default:
         return true;

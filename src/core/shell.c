@@ -1,5 +1,6 @@
 /* shell.c — the command line (shell.h). */
 
+#include "keycodes.h"
 #include "shell.h"
 
 #include <stdarg.h>
@@ -149,6 +150,21 @@ void shell_error(shell_t *sh, const char *fmt, ...) {
 bool shell_interrupted(shell_t *sh) {
     if (!sh->stop && sh->hooks.interrupted && sh->hooks.interrupted(sh->hooks.ctx)) sh->stop = true;
     return sh->stop;
+}
+
+int shell_getkey(shell_t *sh) {
+    if (sh->wheel_left) {
+        int up = sh->wheel_left > 0;
+        sh->wheel_left += up ? -1 : 1;
+        return up ? KEY_UP : KEY_DOWN;
+    }
+    int k = sh->hooks.getkey(sh->hooks.ctx);
+    if (k == KEY_WHEEL_UP || k == KEY_WHEEL_DOWN) {
+        int up = k == KEY_WHEEL_UP;
+        sh->wheel_left = up ? SHELL_WHEEL_LINES - 1 : -(SHELL_WHEEL_LINES - 1);
+        return up ? KEY_UP : KEY_DOWN;
+    }
+    return k;
 }
 
 /* ---- commands --------------------------------------------------------- */

@@ -16,6 +16,29 @@ Each entry gives:
 - a **not checked** list, carried forward until something checks each item
   or a decision drops it.
 
+## M16 — The mouse in the shell, step 1: the wheel (2026-11-02, branch `m15-hdmi`)
+
+**Built 2026-11-02; the owner tried the wheel on the board the same day: it scrolls the history and works in vi** (design.md §3.12). The owner ran
+`mouse-test.uf2` with a Bluetooth mouse on a Pico 2 W: the pointer was
+smooth, a gain of 0.5 with no acceleration was right, the wheel's
+direction and the buttons were as shown (the other mouse, a keyboard's
+trackpad, to be tried later). The shell now reads the wheel: `KEY_WHEEL_UP`
+and `KEY_WHEEL_DOWN`, from `bt_source()` into the key ring, are a step of
+the history at the prompt, three lines in vi and EDIT, and three rows of
+`more` going back.
+
+**Checked on the host.** `test_keys` (the codes pass), `test_line` (the
+history), `test_text` (`more`: forward ignored, back three rows),
+`test_vi` and `test_edit` (three lines, forward and back, and forward at the
+top staying). A planted change of `SHELL_WHEEL_LINES` to 2 failed five
+tests (`test_text`, `test_vi`, `test_edit` and their W-size twins). All 33
+tests pass; the W builds (release, HDMI, DOS) and the Pico 2 release build
+with no warnings: the UNIX W release build 495,104 B, 29,184 B free.
+
+**Not confirmed on the board.** The wheel in `more` of a long file and in
+EDIT; a mouse and a keyboard together (no key lost, the order of the
+wheel's notches and the keys); and no mouse.
+
 ## M14, follow-up — btpair 2.1's keyboard and mouse (2026-11-02, branch `m15-hdmi`)
 
 picocalc-extras' `btkbd.c` was rewritten for a mouse beside the keyboard
@@ -32,6 +55,10 @@ builds (UNIX, DOS, release, HDMI) build with no warnings. RAM: the UNIX W
 release build 494,724 B, 29,564 B free (was 492,620); the development W
 build 497,664 B (was 495,424), 26,624 B free; DOS W 486,960 B, 37,328 B
 free.
+
+**`mouse-test.uf2` built 2026-11-02** (design.md §3.10): a RAM program in
+three pages (the numbers, a pixel pointer, a cell pointer), 212,884 B of
+RAM, no warnings. Not run on the board; the host has no test for it.
 
 **Not checked on the board.** All of it: a keyboard alone paired with
 btpair 2.1 (the file's format and the reconnection), a keyboard and a mouse

@@ -88,6 +88,14 @@ the last save are lost if the power is switched off.
 as a large `COPY`, and drops the rest of the line. It stops a batch file
 too, even one that loops for ever.
 
+### The mouse's wheel
+
+In the Pico 2 W build, a Bluetooth mouse paired with `btpair` has its wheel
+work as the arrow keys: at the prompt a notch is a step of the history,
+and in the editor (vi or EDIT) the cursor goes three lines, up for a notch
+forward. In `MORE` a notch back shows three rows more. The mouse's
+movement and buttons are not used yet.
+
 ### The PicoCalc's own keys
 
 Alt+`,`, Alt+`.`, Alt+Space and Alt+B belong to the keyboard itself: it

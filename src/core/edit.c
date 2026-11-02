@@ -567,7 +567,7 @@ static void redraw_all(void) {
 
 static int key(void) {
     if (ed.eof) return -1;
-    int k = ed.sh->hooks.getkey(ed.sh->hooks.ctx);
+    int k = shell_getkey(ed.sh);
     if (k < 0) ed.eof = true;
     if (k == KEY_ESC) k = ESC;
     return k;

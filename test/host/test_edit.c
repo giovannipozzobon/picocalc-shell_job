@@ -159,6 +159,11 @@ static int edit_tests(bool fat32) {
     CHECK(shot.row == 2 && shot.col == 0, "cursor at %u,%u", shot.row, shot.col);
     CHECK(strcmp(sh.cwd, "/HOME") == 0, "in \\HOME after");
 
+    /* The mouse's wheel: three lines a notch. */
+    CHECK(put("/HOME/V.TXT", "1\n2\n3\n4\n5\n6\n7\n8\n") && edit("EDIT V.TXT", "\xdb") == 0 && shot.row == 5,
+          "wheel back: row %u", shot.row);
+    CHECK(edit("EDIT V.TXT", "\xdb\xdb\xda") == 0 && shot.row == 5, "and forward: row %u", shot.row);
+
     /* Only 40 columns: no FONT. */
     CHECK(shell_run(&sh, "FONT 5x10") != 0, "no FONT");
 

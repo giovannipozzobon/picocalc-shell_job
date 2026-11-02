@@ -504,6 +504,42 @@ else()
         pico_enable_stdio_usb(btkbd-test 0)
         pico_add_extra_outputs(btkbd-test)
         target_link_options(btkbd-test PRIVATE -Wl,--print-memory-usage)
+
+        # The mouse beside it: a program that shows what the mouse does.
+        add_executable(mouse-test
+            test/pico/mouse_test.c
+            src/port/cyw43_fw.c
+            src/port/diskio.c
+            src/port/kbd.c
+            src/port/lcd.c
+            src/port/screen.c
+            src/port/sd.c
+            src/port/southbridge.c
+        )
+        pico_set_binary_type(mouse-test no_flash)
+        pico_set_program_name(mouse-test "mouse-test")
+        target_include_directories(mouse-test PRIVATE include src/port)
+        target_compile_definitions(mouse-test PRIVATE
+            PICO_SHELL_UART=${PICO_SHELL_UART_ON}
+            PICO_SHELL_LCD_SPI_HZ=${PICO_SHELL_LCD_SPI_HZ}
+            PICO_CLOCK_ADJUST_PERI_CLOCK_WITH_SYS_CLOCK=1
+            PICO_DEFAULT_UART=0
+            PICO_DEFAULT_UART_TX_PIN=2
+            PICO_DEFAULT_UART_RX_PIN=3
+        )
+        target_link_libraries(mouse-test
+            shell_core
+            shell_btkbd
+            cyw43_fw_stream
+            pico_stdlib
+            hardware_dma
+            hardware_i2c
+            hardware_spi
+        )
+        pico_enable_stdio_uart(mouse-test ${PICO_SHELL_UART_ON})
+        pico_enable_stdio_usb(mouse-test 0)
+        pico_add_extra_outputs(mouse-test)
+        target_link_options(mouse-test PRIVATE -Wl,--print-memory-usage)
     endif()
 
     # ntp.uf2, for /pico2-apps/ in the W build: Wi-Fi and NTP in a RAM
