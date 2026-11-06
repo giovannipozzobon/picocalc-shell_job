@@ -690,9 +690,9 @@ static int test_shell(void) {
     CHECK(run("/pico2-apps") == 127 && strcmp(con, "/pico2-apps: is a directory\n") == 0,
           "a directory: '%s'", con);
 
-    /* No arguments yet (design.md §3.5), and no redirection. */
-    CHECK(run("prog x") == 2 && boots == 0 &&
-              strcmp(con, "prog: a program takes no arguments, redirection or pipe yet\n") == 0,
+    /* A program that has not declared takes no arguments (test_args has
+     * the rest, design.md §3.5), and none takes a redirection. */
+    CHECK(run("prog x") == 2 && boots == 0 && strcmp(con, "prog: takes no arguments\n") == 0,
           "argument: '%s'", con);
     CHECK(run("prog > out") == 2 && boots == 0, "redirection: '%s'", con);
     CHECK(run("nosuch x") == 127 && strcmp(con, "nosuch: not found\n") == 0, "'%s'", con);

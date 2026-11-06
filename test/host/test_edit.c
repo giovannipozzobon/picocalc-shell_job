@@ -141,7 +141,8 @@ static int edit_tests(bool fat32) {
     files_mount();
     CHECK(f_mkdir("/HOME") == FR_OK, "dirs");
     shell_start(&sh);
-    CHECK(strcmp(sh.cwd, "/HOME") == 0, "in \\HOME");
+    CHECK(strcmp(sh.cwd, "/") == 0, "at the root");
+    strcpy(sh.cwd, "/HOME");
 
     /* The screen: menu bar, title, text, status, in 40 columns. */
     CHECK(put("/HOME/A.TXT", "hello\nworld\n"), "a.txt");

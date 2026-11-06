@@ -75,7 +75,7 @@ bool parse_line(parse_t *p, const char *line) {
             else if (s[0] == '|') next = SEP_PIPE, s += 1;
             else return fail(p, "& is not supported");
             if (!c || c->argc == 0) return fail(p, "a separator with no command before it");
-            if (next == SEP_PIPE && c->out) return fail(p, "output both redirected and piped");
+            if (next == SEP_PIPE && (c->out || c->out_to_err)) return fail(p, "output both redirected and piped");
             p->words[nwords++] = NULL;
             c = NULL;
             sep = next;
@@ -92,6 +92,26 @@ bool parse_line(parse_t *p, const char *line) {
 
         if (*s == '<' && c->sep == SEP_PIPE) return fail(p, "input both piped and redirected");
 
+        /* 1> and 2>: a number alone, right against the '>'. */
+        int fd = 1;
+        if ((s[0] == '1' || s[0] == '2') && s[1] == '>') fd = *s++ - '0';
+
+        if (*s == '>' && s[1] == '&') {
+            if ((s[2] != '1' && s[2] != '2') || (s[3] && !is_blank(s[3]) && !is_meta(s[3])))
+                return fail(p, "only >&1 and >&2 are supported");
+            if (fd == 2 && s[2] == '1') {
+                c->err = NULL;
+                c->err_to_out = true;
+                c->err_to_file = c->out != NULL;
+            } else if (fd == 1 && s[2] == '2') {
+                c->out = NULL;
+                c->out_to_err = true;
+            }
+            s += 3;
+            c->end = (unsigned)(s - line);
+            continue;
+        }
+
         if (*s == '<' || *s == '>') {
             bool out = *s == '>';
             bool append = out && s[1] == '>';
@@ -101,9 +121,14 @@ bool parse_line(parse_t *p, const char *line) {
             char *name = t;
             if (!word(p, &s, &t)) return false;
             c->end = (unsigned)(s - line);
-            if (out) {
+            if (fd == 2) {
+                c->err = name;
+                c->err_append = append;
+                c->err_to_out = false;
+            } else if (out) {
                 c->out = name;
                 c->append = append;
+                c->out_to_err = false;
             } else {
                 c->in = name;
             }

@@ -136,6 +136,14 @@ static bool command(dos_parse_t *p, writer_t *w, size_t *nwords, const char *s, 
         head[cut - n0] = '\0';
         if (shell_is_builtin(head)) r = cut;
     }
+    /* A '/' ends any command's name, as DOS's switch character did, so
+     * PICO-ORIC/T is PICO-ORIC /T (design.md §4.7). */
+    for (const char *k = n0; k < r; k++) {
+        if (*k == '/') {
+            r = k;
+            break;
+        }
+    }
     if (*nwords == SHELL_WORDS_MAX) return fail(p, "Too many parameters");
     p->words[(*nwords)++] = w->t;
     c->argc = 1;

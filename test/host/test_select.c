@@ -252,6 +252,13 @@ int main(void) {
     /* After all that, an ordinary line still runs. */
     CHECK(run_keys("echo fine", NULL) == 0 && strcmp(con, "fine\n") == 0, "fine: '%s'", con);
 
+    /* ---- exit leaves the selects with its script, and the next runs ---- */
+    CHECK(put("/ex.sh", "select p in a b\ndo\nselect q in c\ndo\nexit 7\ndone\necho never\ndone\necho never\n"),
+          "ex.sh");
+    CHECK(run_keys("sh /ex.sh; echo got $?", "1\r1\r") == 0 && has("got 7\n") && !has("never"), "'%s'", con);
+    CHECK(run_keys("select p in a; do echo $p; done", "1\r\033") != 0 && has("a\n"), "selects still work: '%s'", con);
+    sh.stop = false;
+
     /* ---- no keyboard ---- */
     const shell_hooks_t none = { now, interrupted, NULL, NULL, NULL, NULL };
     shell_init(&sh, &out, &none, "test");

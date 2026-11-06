@@ -118,6 +118,28 @@ int main(void) {
     memset(line, 0, sizeof line);
     memset(line, 'q', SHELL_LINE_MAX);
     CHECK(parse_line(&p, line) && strlen(p.cmds[0].argv[0]) == SHELL_LINE_MAX, "one long word");
+    /* The error stream, and which number counts. */
+    const parse_cmd_t *c = &p.cmds[0];
+    CHECK(parse_line(&p, "a 2> e") && c->argc == 1 && strcmp(c->err, "e") == 0 && !c->err_append,
+          "2>");
+    CHECK(parse_line(&p, "a 2>>e") && strcmp(c->err, "e") == 0 && c->err_append, "2>>");
+    CHECK(parse_line(&p, "a 2>&1") && c->argc == 1 && c->err_to_out && !c->err_to_file, "2>&1");
+    CHECK(parse_line(&p, "a > o 2>&1") && c->err_to_out && c->err_to_file, "> o 2>&1");
+    CHECK(parse_line(&p, "a 2>&1 > o") && c->err_to_out && !c->err_to_file, "2>&1 > o");
+    CHECK(parse_line(&p, "a >&2") && c->out_to_err && !c->out, ">&2");
+    CHECK(parse_line(&p, "a 1>&2") && c->out_to_err, "1>&2");
+    CHECK(parse_line(&p, "a 1> o") && strcmp(c->out, "o") == 0, "1>");
+    CHECK(parse_line(&p, "a 2>&1 | b") && p.ncmds == 2 && c->err_to_out, "into a pipe");
+    CHECK(parse_line(&p, "a 2 > o") && c->argc == 2 && strcmp(c->argv[1], "2") == 0 && !c->err,
+          "2 alone is a word");
+    CHECK(parse_line(&p, "a x2> o") && c->argc == 2 && strcmp(c->argv[1], "x2") == 0 && !c->err,
+          "x2 is a word");
+    CHECK(parse_line(&p, "a 12> o") && c->argc == 2 && strcmp(c->argv[1], "12") == 0, "12 is a word");
+    CHECK(!parse_line(&p, "a >&3") && strstr(p.error, ">&1 and >&2"), ">&3");
+    CHECK(!parse_line(&p, "a >&2x"), ">&2x");
+    CHECK(!parse_line(&p, "a >&2 | b") && strstr(p.error, "piped"), ">&2 and a pipe");
+    CHECK(!parse_line(&p, "a 2>") && strstr(p.error, "no file"), "2> nothing");
+
     static char longer[SHELL_LINE_MAX + 2];
     memset(longer, 'q', SHELL_LINE_MAX + 1);
     CHECK(!parse_line(&p, longer) && strcmp(p.error, "line too long") == 0, "one character more");

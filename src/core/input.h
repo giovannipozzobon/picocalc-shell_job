@@ -1,6 +1,6 @@
 /* input.h — what a command reads: a file, `<` or a pipe (design.md §4.4).
  *
- * The keyboard is never a command's input: `cat` with no file and no
+ * The keyboard is never a command's input, but for DOS's COPY CON: `cat` with no file and no
  * `<` or pipe says how to use it. */
 #ifndef SHELL_INPUT_H
 #define SHELL_INPUT_H

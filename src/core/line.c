@@ -195,6 +195,8 @@ static void offer_commands(shell_t *sh, const char *prefix, size_t n) {
     const char *name;
     for (unsigned i = 0; (name = shell_builtin_at(i)) != NULL; i++)
         if (has_prefix(name, prefix, n)) offer(name, strlen(name), false);
+    /* DOS looks in the current directory first, as run.c does. */
+    if (SHELL_DOS && flavour_resolve(s_dir, sh->cwd, ".")) offer_dir(s_dir, prefix, n, true);
     /* An empty entry is the current directory, as in run.c's search. */
     for (const char *path = vars_get("PATH", 4); path;) {
         const char *colon = strchr(path, FLAVOUR_PATH_SEP);
@@ -221,7 +223,7 @@ static const char k_sep[] = { SHELL_DOS ? '\\' : '/', '\0' };
 /* Whether c ends a directory in a path being completed: in DOS, '\',
  * '/' and the ':' of C:. */
 static bool is_sep(char c) {
-    return c == '/' || (SHELL_DOS && (c == '\\' || c == ':'));
+    return SHELL_DOS ? c == '\\' || c == ':' : c == '/';
 }
 
 /* Put name[from, to) in at the cursor, escaped. */
@@ -296,7 +298,10 @@ static void complete(shell_t *sh) {
     } else {
         char keep = s_word[base];
         s_word[base] = '\0';
-        bool ok = flavour_resolve(s_dir, sh->cwd, base ? s_word : ".");
+        /* ~/ is $HOME, as expansion has it. */
+        const char *home = !SHELL_DOS && s_word[0] == '~' && s_word[1] == '/' ? vars_get("HOME", 4) : NULL;
+        bool ok = home ? flavour_resolve(s_dir, home, base > 2 ? s_word + 2 : ".")
+                       : flavour_resolve(s_dir, sh->cwd, base ? s_word : ".");
         s_word[base] = keep;
         if (ok) offer_dir(s_dir, s_word + base, n - base, false);
     }
@@ -324,6 +329,9 @@ static void complete(shell_t *sh) {
 }
 
 /* ---- keys ------------------------------------------------------------- */
+
+/* A command is asking (line_read), after a prompt of its own. */
+static bool s_asked;
 
 bool line_key(shell_t *sh, int key) {
     line_t *l = &sh->line;
@@ -369,6 +377,27 @@ bool line_key(shell_t *sh, int key) {
     case 0x0B:   /* Ctrl-K */
         erase(sh, l->pos, l->len - l->pos);
         break;
+    case 0x17: {  /* UNIX: Ctrl-W, the word before the cursor */
+        if (SHELL_DOS) break;
+        size_t at = l->pos;
+        while (at > 0 && (l->text[at - 1] == ' ' || l->text[at - 1] == '\t')) at--;
+        while (at > 0 && l->text[at - 1] != ' ' && l->text[at - 1] != '\t') at--;
+        erase(sh, at, l->pos - at);
+        break;
+    }
+    case 0x0C: {  /* UNIX: Ctrl-L, a clean screen with the line on it */
+        if (SHELL_DOS || s_asked) break;
+        static char keep[SHELL_LINE_MAX + 1];
+        size_t pos = l->pos;
+        memcpy(keep, l->text, l->len + 1);
+        size_t len = l->len;
+        out_puts(&sh->con, "\033[H\033[2J");
+        shell_prompt(sh);
+        insert(sh, keep, len);
+        l->pos = pos;
+        go(sh, l->prompt + pos);
+        break;
+    }
     case KEY_UP:
     case KEY_WHEEL_UP:
     case 0x10:
@@ -409,13 +438,45 @@ int line_read(shell_t *sh, const char *prompt) {
     if (!sh->at_bol) out_puts(&sh->con, "\n");
     out_puts(&sh->con, prompt);
     line_start(sh, strlen(prompt));
+    s_asked = true;
+    int got;
+    for (;;) {
+        int key = sh->hooks.getkey(sh->hooks.ctx);
+        if (key < 0) {
+            out_puts(&sh->con, "\n");
+            got = 0;
+            break;
+        }
+        if (key == 0x03 || key == 0x1B || key == KEY_BREAK) {
+            line_key(sh, KEY_END);
+            sh->stop = true;
+            got = -1;
+            break;
+        }
+        if (line_key(sh, key)) {
+            got = 1;
+            break;
+        }
+    }
+    s_asked = false;
+    return got;
+}
+
+int line_read_text(shell_t *sh) {
+    if (!sh->at_bol) out_puts(&sh->con, "\n");
+    line_start(sh, 0);
     for (;;) {
         int key = sh->hooks.getkey(sh->hooks.ctx);
         if (key < 0) {
             out_puts(&sh->con, "\n");
             return 0;
         }
-        if (key == 0x03 || key == 0x1B || key == KEY_BREAK) {
+        if (key == 0x1A || key == KEY_F6) {
+            line_key(sh, KEY_END);
+            out_puts(&sh->con, "^Z\n");
+            return 0;
+        }
+        if (key == 0x03 || key == KEY_BREAK) {
             line_key(sh, KEY_END);
             sh->stop = true;
             return -1;

@@ -33,6 +33,10 @@ enum { BOOT_DEFAULT, BOOT_SD, BOOT_UPDATE, BOOT_RAM };
 
 static_assert(PICOCALC_SHELL_LOADER_MAGIC == BL_MAGIC, "picocalc_shell.h: the magic");
 static_assert(PICOCALC_SHELL_BOOT_SD == BOOT_SD, "picocalc_shell.h: BOOT_SD");
+static_assert(PICOCALC_SHELL_ARGS_MAGIC0 == UF2_ARGS_MAGIC0 &&
+                  PICOCALC_SHELL_ARGS_MAGIC1 == UF2_ARGS_MAGIC1 &&
+                  PICOCALC_SHELL_ARGS_RECORD == UF2_ARGS_RECORD,
+              "picocalc_shell.h: the arguments' record");
 static_assert(XIP_BASE == 0x10000000u && SRAM_BASE == UF2_SRAM_BASE && SRAM_END == UF2_SRAM_END,
               "uf2.h: the RP2350's address map");
 

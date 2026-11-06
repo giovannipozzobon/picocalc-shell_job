@@ -102,9 +102,12 @@ typedef struct {
 } line_t;
 
 typedef struct shell {
-    out_t         con;              /* the terminal: prompt, echo, errors */
+    out_t         con;              /* the terminal: prompt, echo */
     out_t         out;              /* a command's output: con, a file or a pipe */
     bool          out_is_con;
+    out_t         err;              /* shell_error's: con, unless UNIX's 2> says otherwise */
+    bool          err_is_con;
+    bool          err_to_out;       /* the next shell_command: `> file 2>&1` */
     input_t       in;               /* a command's input: a file, a pipe, or none */
     bool          stop;             /* interrupted: the rest of the line is dropped */
     int           wheel_left;       /* Up (+) or Down (-) keys left of a wheel notch (shell_getkey) */
@@ -157,6 +160,17 @@ int shell_run(shell_t *sh, const char *line);
 /* Before the shell is left for a program, the menu or USB: give the
  * port the clock's local offset, and save the history. */
 void shell_leaving(shell_t *sh);
+
+/* The shell is restarting, not being switched off: its next start comes
+ * back to the current directory. */
+void shell_keep_cwd(shell_t *sh);
+
+/* Output thrown away: /dev/null's and DOS's NUL. */
+extern const out_t shell_null_out;
+
+/* Whether `name` is a program or a builtin that leaves the shell, so
+ * can leave no redirection's name.new behind. */
+bool shell_leaves(const char *name);
 
 /* For builtins: an error to the terminal, never to a redirection. */
 void shell_error(shell_t *sh, const char *fmt, ...) __attribute__((format(printf, 2, 3)));

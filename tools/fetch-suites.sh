@@ -31,3 +31,7 @@ copy "${PICO_ACE:-$refs/pico-jupiter-ace/build/pico-release/pico-ace.uf2}" pico-
 copy "$loader/bootloader_pico2.uf2" stage3-pico2.uf2
 copy "$loader/BOOT2350.uf2" loader-menu.uf2
 copy "$loader/BOOT2040.uf2" loader-menu-rp2040.uf2
+# This tree's own, which test_args reads for the record that says a program
+# takes arguments: a real link's proof the record survives --gc-sections.
+copy "$root/build/pico/args-test.uf2" args-test.uf2
+copy "$root/build/pico/args-ram.uf2" args-ram.uf2

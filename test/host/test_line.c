@@ -81,6 +81,29 @@ int main(void) {
           "files");
     shell_start(&sh);
 
+    /* ---- Ctrl-W and Ctrl-L ---- */
+    fresh();
+    type("echo one  two");
+    key(0x17);
+    CHECK(strcmp(sh.line.text, "echo one  ") == 0 && strcmp(row(0), "/home>echo one") == 0, "Ctrl-W: '%s'", row(0));
+    key(0x17);
+    CHECK(strcmp(sh.line.text, "echo ") == 0, "over the spaces: '%s'", sh.line.text);
+    key(0x17), key(0x17);
+    CHECK(strcmp(row(0), "/home>") == 0 && sh.line.len == 0, "at the start: '%s'", row(0));
+    type("echo wrld");
+    key(KEY_LEFT), key(KEY_LEFT);
+    key(0x0C);
+    CHECK(strcmp(row(0), "/home>echo wrld") == 0 && AT(0, 13) && strcmp(sh.line.text, "echo wrld") == 0,
+          "Ctrl-L: '%s' %u,%u", row(0), t.row, t.col);
+    key(0x03);
+
+    /* ---- ~/ completes under $HOME ---- */
+    fresh();
+    type("cd /; cat ~/no");
+    key(KEY_TAB);
+    CHECK(strcmp(sh.line.text, "cd /; cat ~/notes.txt ") == 0, "~/: '%s'", sh.line.text);
+    key(0x03);
+
     /* ---- editing ---- */
     fresh();
     type("echo wrld");

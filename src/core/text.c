@@ -2,10 +2,13 @@
 
 #include "text.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #include "editor_pattern.h"
 #include "files.h"
+#include "vi.h"
+#include "flavour.h"
 #include "keycodes.h"
 #include "term.h"
 
@@ -29,7 +32,7 @@ static void flush(shell_t *sh, pager_t *pg) {
 }
 
 /* --More-- and a key: whether to go on. */
-static bool wait(shell_t *sh, pager_t *pg) {
+static bool pager_wait(shell_t *sh, pager_t *pg) {
     flush(sh, pg);
     out_puts(&sh->con, "\033[7m--More--\033[0m");
     int key;
@@ -60,7 +63,7 @@ static bool wait(shell_t *sh, pager_t *pg) {
 
 /* One byte to the screen, counting the rows it fills as term.c does. */
 static void page_byte(shell_t *sh, pager_t *pg, char c) {
-    if (pg->row >= pg->page && !wait(sh, pg)) {
+    if (pg->row >= pg->page && !pager_wait(sh, pg)) {
         pg->quit = true;
         return;
     }
@@ -463,3 +466,134 @@ int cmd_wc(shell_t *sh, int argc, char **argv) {
     if (argc - first > 1) wc_print(sh, &total, flags, "total");
     return status;
 }
+
+#if !SHELL_DOS   /* uniq and sort are the UNIX flavour's */
+
+/* ---- uniq ------------------------------------------------------------- */
+
+enum { UNIQ_C = 1u << 0, UNIQ_D = 1u << 1 };
+
+static void uniq_show(shell_t *sh, const char *line, unsigned long count, unsigned flags) {
+    if ((flags & UNIQ_D) && count < 2) return;
+    if (flags & UNIQ_C) out_printf(&sh->out, "%7lu ", count);
+    out_puts(&sh->out, line);
+    out_puts(&sh->out, "\n");
+}
+
+int cmd_uniq(shell_t *sh, int argc, char **argv) {
+    static const char use[] = "uniq [-c] [-d] [file]";
+    static char prev[SHELL_TEXT_LINE];
+    unsigned flags;
+    int first = files_options(sh, argc, argv, "cd", &flags, use);
+    if (first < 0) return 1;
+    bool file = argc > first;
+    if (argc - first > 1 || (!file && !input_any(&sh->in))) {
+        shell_error(sh, "usage: %s (or < file, or ... | uniq)\n", use);
+        return 1;
+    }
+    if (file && files_open_read(sh, "uniq", argv[first], &s_file) != FR_OK) return 1;
+    reader_init(&s_rd, file ? &(input_t){ &s_file, NULL } : &sh->in);
+    unsigned long count = 0;
+    bool whole;
+    while (!shell_interrupted(sh) && reader_line(&s_rd, s_line, sizeof s_line, &whole) >= 0) {
+        if (count && strcmp(prev, s_line) == 0) {
+            count++;
+            continue;
+        }
+        if (count) uniq_show(sh, prev, count, flags);
+        strcpy(prev, s_line);
+        count = 1;
+    }
+    if (count && !sh->stop) uniq_show(sh, prev, count, flags);
+    if (file) f_close(&s_file);
+    if (s_rd.r != FR_OK) {
+        shell_error(sh, "uniq: %s\n", files_why(s_rd.r));
+        return 1;
+    }
+    return 0;
+}
+
+/* ---- sort ------------------------------------------------------------- */
+
+/* vi's buffer, idle while a command runs, so sort costs no RAM of its
+ * own: the lines from its start, their offsets from its end. More is
+ * refused, not spilled to the card. */
+static char    *s_sort;
+static size_t   s_sort_size;
+static size_t   s_sort_used;
+static unsigned s_sort_lines;
+static unsigned s_sort_flags;
+enum { SORT_R = 1u << 0, SORT_N = 1u << 1, SORT_U = 1u << 2 };
+
+static uint16_t *sort_index(void) {
+    return (uint16_t *)(void *)(s_sort + s_sort_size) - s_sort_lines;
+}
+
+static int sort_cmp(const void *a, const void *b) {
+    const char *x = s_sort + *(const uint16_t *)a, *y = s_sort + *(const uint16_t *)b;
+    int d = 0;
+    if (s_sort_flags & SORT_N) {
+        long nx = strtol(x, NULL, 10), ny = strtol(y, NULL, 10);
+        d = nx < ny ? -1 : nx > ny;
+    }
+    if (!d) d = strcmp(x, y);
+    return (s_sort_flags & SORT_R) ? -d : d;
+}
+
+/* An input's lines, added: false, with the error printed, if they do not
+ * fit or cannot be read. */
+static bool sort_in(shell_t *sh, const input_t *in, const char *name) {
+    bool whole;
+    long n;
+    reader_init(&s_rd, in);
+    while (!shell_interrupted(sh) && (n = reader_line(&s_rd, s_line, sizeof s_line, &whole)) >= 0) {
+        size_t room = s_sort_size - (s_sort_lines + 1u) * sizeof(uint16_t);
+        if (s_sort_used + (size_t)n + 1u > room) {
+            shell_error(sh, "sort: more than %u bytes to sort\n", (unsigned)s_sort_size);
+            return false;
+        }
+        memcpy(s_sort + s_sort_used, s_line, (size_t)n + 1u);
+        s_sort_lines++;
+        sort_index()[0] = (uint16_t)s_sort_used;
+        s_sort_used += (size_t)n + 1u;
+    }
+    if (s_rd.r != FR_OK) {
+        shell_error(sh, "sort: %s: %s\n", name, files_why(s_rd.r));
+        return false;
+    }
+    return true;
+}
+
+int cmd_sort(shell_t *sh, int argc, char **argv) {
+    static const char use[] = "sort [-r] [-n] [-u] [file...]";
+    int first = files_options(sh, argc, argv, "rnu", &s_sort_flags, use);
+    if (first < 0) return 1;
+    if (first == argc && !input_any(&sh->in)) {
+        shell_error(sh, "usage: %s (or < file, or ... | sort)\n", use);
+        return 1;
+    }
+    s_sort = vi_scratch(&s_sort_size);
+    s_sort_size &= ~(size_t)1u;   /* the index is 16-bit, aligned from the end */
+    s_sort_used = 0;
+    s_sort_lines = 0;
+    bool ok = first == argc ? sort_in(sh, &sh->in, "input") : true;
+    for (int i = first; i < argc && ok; i++) {
+        if (files_open_read(sh, "sort", argv[i], &s_file) != FR_OK) return 1;
+        ok = sort_in(sh, &(input_t){ &s_file, NULL }, argv[i]);
+        f_close(&s_file);
+    }
+    if (!ok || sh->stop) return 1;
+    uint16_t *index = sort_index();
+    qsort(index, s_sort_lines, sizeof index[0], sort_cmp);
+    const char *last = NULL;
+    for (unsigned i = 0; i < s_sort_lines && !shell_interrupted(sh); i++) {
+        const char *line = s_sort + index[i];
+        if ((s_sort_flags & SORT_U) && last && strcmp(last, line) == 0) continue;
+        out_puts(&sh->out, line);
+        out_puts(&sh->out, "\n");
+        last = line;
+    }
+    return 0;
+}
+
+#endif /* !SHELL_DOS */

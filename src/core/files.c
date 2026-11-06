@@ -44,7 +44,10 @@ bool files_is_dir(const char *path) {
 /* `arg` as typed, in the flavour's paths, made absolute. */
 static bool resolve(shell_t *sh, const char *cmd, const char *arg, char *out) {
     if (flavour_resolve(out, sh->cwd, arg)) return true;
-    flavour_file_error(sh, cmd, arg, "name too long");
+    /* In DOS's paths, '/' can only have been a switch (§4.7). */
+    const char *slash = SHELL_DOS ? strchr(arg, '/') : NULL;
+    if (slash) shell_error(sh, "Invalid switch - %s\n", slash);
+    else flavour_file_error(sh, cmd, arg, "name too long");
     return false;
 }
 
@@ -88,8 +91,9 @@ FRESULT files_open_startup(FIL *f, const char *path) {
     return r2 == FR_OK ? FR_OK : r;
 }
 
-bool files_redirect(shell_t *sh, const char *arg, bool append) {
-    files_safe_t *w = &s_redir[sh->depth];
+/* `arg` open through name.new for a redirection into w, with what is
+ * there first if `append`. */
+static bool redirect_open(shell_t *sh, files_safe_t *w, const char *arg, bool append) {
     if (!resolve(sh, "shell", arg, s_a)) return false;
     const char *err = files_safe_open(w, s_a);
     if (!err && append) {
@@ -110,10 +114,35 @@ bool files_redirect(shell_t *sh, const char *arg, bool append) {
         flavour_file_error(sh, "shell", arg, err);
         return false;
     }
+    return true;
+}
+
+bool files_redirect(shell_t *sh, const char *arg, bool append) {
+    files_safe_t *w = &s_redir[sh->depth];
+    if (!redirect_open(sh, w, arg, append)) return false;
     sh->out = (out_t){ redir_write, w, true };
     sh->out_is_con = false;
     return true;
 }
+
+#if !SHELL_DOS   /* 2>, tee and find are the UNIX flavour's */
+bool files_redirect_err(shell_t *sh, const char *arg, bool append) {
+    static files_safe_t errs[SHELL_DEPTH];
+    files_safe_t *w = &errs[sh->depth];
+    if (!redirect_open(sh, w, arg, append)) return false;
+    sh->err = (out_t){ redir_write, w, true };
+    sh->err_is_con = false;
+    return true;
+}
+
+bool files_redirect_err_end(shell_t *sh, const out_t *was) {
+    files_safe_t *w = sh->err.ctx;
+    sh->err = *was;
+    const char *err = files_safe_commit(w);
+    if (err) flavour_file_error(sh, "shell", w->path, err);
+    return err == NULL;
+}
+#endif
 
 bool files_redirect_end(shell_t *sh) {
     files_safe_t *w = &s_redir[sh->depth];
@@ -149,10 +178,11 @@ int cmd_pwd(shell_t *sh, int argc, char **argv) {
 }
 
 int cmd_cd(shell_t *sh, int argc, char **argv) {
-    if (argc > 2) return usage(sh, "cd [dir]");
-    const char *arg = argc == 2 ? argv[1] : vars_get("HOME", 4);
+    if (argc > 2) return usage(sh, "cd [dir | -]");
+    bool back = argc == 2 && strcmp(argv[1], "-") == 0;
+    const char *arg = back ? vars_get("OLDPWD", 6) : argc == 2 ? argv[1] : vars_get("HOME", 4);
     if (!arg) {
-        shell_error(sh, "cd: HOME is not set\n");
+        shell_error(sh, "cd: %s is not set\n", back ? "OLDPWD" : "HOME");
         return 1;
     }
     if (!resolve(sh, "cd", arg, s_a)) return 1;
@@ -165,27 +195,29 @@ int cmd_cd(shell_t *sh, int argc, char **argv) {
         shell_error(sh, "cd: %s: not a directory\n", arg);
         return 1;
     }
+    strcpy(s_c, sh->cwd);
     const char *why = files_chdir(sh, s_a);
     if (why) {
         shell_error(sh, "cd: %s: %s\n", arg, why);
         return 1;
     }
+    vars_set("OLDPWD", 6, s_c);
+    if (back) out_printf(&sh->out, "%s\n", sh->cwd);
     return 0;
 }
 
-const char *files_chdir(shell_t *sh, const char *path) {
-    /* The prompt shows each name as the card spells it, not as typed.
-     * f_stat gives a long name back as it was asked for, so each one is
+const char *files_spelled(const char *path, char out[SHELL_PATH_MAX + 1]) {
+    /* f_stat gives a long name back as it was asked for, so each one is
      * found in its directory's listing. */
     FRESULT r;
     if (path != s_a) strcpy(s_a, path);
     size_t len = 0;
-    s_b[0] = '\0';
+    out[0] = '\0';
     for (char *p = s_a + 1; *p;) {
         char *e = strchr(p, '/');
         if (e) *e = '\0';
         DIR d;
-        r = f_opendir(&d, len ? s_b : "/");
+        r = f_opendir(&d, len ? out : "/");
         while (r == FR_OK && (r = f_readdir(&d, &s_fno)) == FR_OK && s_fno.fname[0])
             if (path_same(s_fno.fname, p) || path_same(s_fno.altname, p)) break;
         f_closedir(&d);
@@ -193,13 +225,20 @@ const char *files_chdir(shell_t *sh, const char *path) {
         if (r != FR_OK) return files_why(r);
         size_t n = strlen(s_fno.fname);
         if (len + 1u + n > SHELL_PATH_MAX) return "name too long";
-        s_b[len++] = '/';
-        memcpy(s_b + len, s_fno.fname, n + 1);
+        out[len++] = '/';
+        memcpy(out + len, s_fno.fname, n + 1);
         len += n;
         p = e ? e + 1 : p + strlen(p);
     }
-    strcpy(sh->cwd, len ? s_b : "/");
+    if (!len) strcpy(out, "/");
     return NULL;
+}
+
+const char *files_chdir(shell_t *sh, const char *path) {
+    /* The prompt shows each name as the card spells it, not as typed. */
+    const char *why = files_spelled(path, s_b);
+    if (!why) strcpy(sh->cwd, s_b);
+    return why;
 }
 
 /* ---- ls --------------------------------------------------------------- */
@@ -400,15 +439,24 @@ static int cat_in(shell_t *sh, const input_t *in, const char *shown) {
     }
 }
 
-FRESULT files_open_read(shell_t *sh, const char *cmd, const char *arg, FIL *f) {
-    if (!resolve(sh, cmd, arg, s_a)) return FR_INVALID_NAME;
-    FRESULT r = f_open(f, s_a, FA_READ);
+/* The absolute `path`, with any error naming `shown`. */
+static FRESULT open_read(shell_t *sh, const char *cmd, const char *shown, const char *path, FIL *f) {
+    FRESULT r = f_open(f, path, FA_READ);
     if (r != FR_OK) {
         /* FatFs opens a directory as no file at all. */
-        bool dir = r == FR_NO_FILE && files_is_dir(s_a);
-        flavour_file_error(sh, cmd, arg, dir ? "is a directory" : files_why(r));
+        bool dir = r == FR_NO_FILE && files_is_dir(path);
+        flavour_file_error(sh, cmd, shown, dir ? "is a directory" : files_why(r));
     }
     return r;
+}
+
+FRESULT files_open_read(shell_t *sh, const char *cmd, const char *arg, FIL *f) {
+    if (!resolve(sh, cmd, arg, s_a)) return FR_INVALID_NAME;
+    return open_read(sh, cmd, arg, s_a, f);
+}
+
+FRESULT files_open_path(shell_t *sh, const char *cmd, const char *path, FIL *f) {
+    return open_read(sh, cmd, path, path, f);
 }
 
 int cmd_cat(shell_t *sh, int argc, char **argv) {
@@ -418,6 +466,7 @@ int cmd_cat(shell_t *sh, int argc, char **argv) {
     }
     int status = 0;
     for (int i = 1; i < argc && !sh->stop; i++) {
+        if (strcmp(argv[i], "/dev/null") == 0) continue;   /* nothing, and no /dev on the card */
         if (files_open_read(sh, "cat", argv[i], &s_src) != FR_OK) {
             status = 1;
             continue;
@@ -427,6 +476,110 @@ int cmd_cat(shell_t *sh, int argc, char **argv) {
     }
     return status;
 }
+
+#if !SHELL_DOS
+
+/* ---- tee -------------------------------------------------------------- */
+
+int cmd_tee(shell_t *sh, int argc, char **argv) {
+    static const char use[] = "tee [-a] [file]";
+    static files_safe_t save;
+    unsigned flags;
+    int first = files_options(sh, argc, argv, "a", &flags, use);
+    if (first < 0) return 1;
+    if (argc - first > 1) return usage(sh, use);
+    if (!input_any(&sh->in)) {
+        shell_error(sh, "usage: %s (with < file, or ... | tee)\n", use);
+        return 1;
+    }
+    bool file = argc > first;
+    if (file && !redirect_open(sh, &save, argv[first], flags != 0)) return 1;
+    for (;;) {
+        UINT n;
+        FRESULT r = input_read(&sh->in, s_buf, sizeof s_buf, &n);
+        if (r != FR_OK) {
+            if (file) files_safe_abort(&save);
+            shell_error(sh, "tee: %s\n", files_why(r));
+            return 1;
+        }
+        if (n == 0) break;
+        out_write(&sh->out, (const char *)s_buf, n);
+        if (file) files_safe_write(&save, s_buf, n);
+        if (shell_interrupted(sh)) {
+            if (file) files_safe_abort(&save);
+            return 1;
+        }
+    }
+    const char *err = file ? files_safe_commit(&save) : NULL;
+    if (err) shell_error(sh, "tee: %s: %s\n", argv[first], err);
+    return err ? 1 : 0;
+}
+
+/* ---- find ------------------------------------------------------------- */
+
+/* An entry, as `root` then what follows the root's own path. */
+static void find_show(shell_t *sh, const char *root, size_t rootlen, const char *path,
+                      const char *name, bool dir, const char *pat, char type) {
+    if ((type == 'f' && dir) || (type == 'd' && !dir)) return;
+    if (pat && !path_match(pat, name)) return;
+    size_t typed = strlen(root);
+    while (typed > 0 && root[typed - 1] == '/') typed--;
+    out_write(&sh->out, root, typed);
+    /* The root itself: `find /` starts with "/". */
+    out_puts(&sh->out, typed || path[rootlen] ? path + rootlen : "/");
+    out_puts(&sh->out, "\n");
+}
+
+int cmd_find(shell_t *sh, int argc, char **argv) {
+    static const char use[] = "find [path] [-name pattern] [-type f|d]";
+    static char top[SHELL_PATH_MAX + 1];
+    const char *root = ".", *pat = NULL;
+    char type = 0;
+    int i = 1;
+    if (i < argc && argv[i][0] != '-') root = argv[i++];
+    for (; i < argc; i += 2) {
+        if (i + 1 == argc) return usage(sh, use);
+        if (strcmp(argv[i], "-name") == 0) pat = argv[i + 1];
+        else if (strcmp(argv[i], "-type") == 0 && (!strcmp(argv[i + 1], "f") || !strcmp(argv[i + 1], "d")))
+            type = argv[i + 1][0];
+        else return usage(sh, use);
+    }
+    if (!resolve(sh, "find", root, top)) return 1;
+    FRESULT r = files_stat(top, &s_fno);
+    if (r != FR_OK) {
+        shell_error(sh, "find: %s: %s\n", root, files_why(r));
+        return 1;
+    }
+    bool at_root = strcmp(top, "/") == 0;
+    size_t rootlen = at_root ? 0 : strlen(top);
+    bool dir = at_root || (s_fno.fattrib & AM_DIR);
+    find_show(sh, root, rootlen, at_root ? "" : top, at_root ? "/" : path_base(top), dir, pat, type);
+    if (!dir) return 0;
+    r = files_walk(top);
+    if (r != FR_OK) {
+        shell_error(sh, "find: %s: %s\n", root, files_why(r));
+        return 1;
+    }
+    int status = 0;
+    const char *path;
+    const FILINFO *fno;
+    walk_t ev;
+    while (!sh->stop && (ev = files_walk_next(&path, &fno, &r)) != WALK_DONE) {
+        if (r != FR_OK) {
+            shell_error(sh, "find: %s: %s\n", path, r == FILES_TOO_DEEP ? "too many levels" : files_why(r));
+            status = 1;
+        } else if (ev == WALK_DIR && files_hidden(fno)) {
+            files_walk_skip();
+        } else if ((ev == WALK_DIR || ev == WALK_FILE) && !files_hidden(fno)) {
+            find_show(sh, root, rootlen, path, fno->fname, ev == WALK_DIR, pat, type);
+        }
+        if (shell_interrupted(sh)) status = 1;
+    }
+    files_walk_end();
+    return status;
+}
+
+#endif /* !SHELL_DOS */
 
 /* ---- cp --------------------------------------------------------------- */
 
@@ -463,6 +616,23 @@ const char *files_copy(shell_t *sh, const char *src, const char *dst, const char
     }
     f_close(&s_src);
     return files_safe_commit(&s_copy);
+}
+
+const char *files_read_out(shell_t *sh, const char *src, const out_t *to) {
+    FRESULT r = f_open(&s_src, src, FA_READ);
+    if (r != FR_OK) return files_why(r);
+    for (;;) {
+        UINT n;
+        r = f_read(&s_src, s_buf, sizeof s_buf, &n);
+        if (r != FR_OK || n == 0) break;
+        if (to) out_write(to, (const char *)s_buf, n);
+        if (shell_interrupted(sh)) {
+            f_close(&s_src);
+            return FILES_STOPPED;
+        }
+    }
+    f_close(&s_src);
+    return r == FR_OK ? NULL : files_why(r);
 }
 
 /* One file to `dst`, both absolute, through dst.new. */
@@ -568,10 +738,12 @@ static int copy_tree(shell_t *sh, const char *src, const char *dst) {
 }
 
 int cmd_cp(shell_t *sh, int argc, char **argv) {
-    static const char use[] = "cp [-r] from... to";
+    static const char use[] = "cp [-rRf] from... to";
     unsigned flags;
-    int first = files_options(sh, argc, argv, "r", &flags, use);
+    /* -f: cp never asks, so it changes nothing. */
+    int first = files_options(sh, argc, argv, "rRf", &flags, use);
     if (first < 0) return 1;
+    flags &= 3u;
     if (argc - first < 2) return usage(sh, use);
 
     const char *to = argv[argc - 1];
@@ -622,7 +794,12 @@ int cmd_cp(shell_t *sh, int argc, char **argv) {
 /* ---- mv --------------------------------------------------------------- */
 
 int cmd_mv(shell_t *sh, int argc, char **argv) {
-    if (argc < 3) return usage(sh, "mv from... to");
+    static const char use[] = "mv [-f] from... to";
+    unsigned flags;
+    /* -f: mv never asks, so it changes nothing. */
+    int first = files_options(sh, argc, argv, "f", &flags, use);
+    if (first < 0) return 1;
+    if (argc - first < 2) return usage(sh, use);
     const char *to = argv[argc - 1];
     if (!resolve(sh, "mv", to, s_b)) return 1;
     FRESULT r = files_stat(s_b, &s_fno);
@@ -631,13 +808,13 @@ int cmd_mv(shell_t *sh, int argc, char **argv) {
         shell_error(sh, "mv: %s: %s\n", to, files_why(r));
         return 1;
     }
-    if (argc > 3 && !to_dir) {
+    if (argc - first > 2 && !to_dir) {
         shell_error(sh, "mv: %s: not a directory\n", to);
         return 1;
     }
 
     int status = 0;
-    for (int i = 1; i < argc - 1 && !sh->stop; i++) {
+    for (int i = first; i < argc - 1 && !sh->stop; i++) {
         if (!resolve(sh, "mv", argv[i], s_a)) {
             status = 1;
             continue;
@@ -826,11 +1003,13 @@ void files_walk_end(void) {
 }
 
 int cmd_rm(shell_t *sh, int argc, char **argv) {
-    static const char use[] = "rm [-r] path...";
+    static const char use[] = "rm [-rRf] path...";
     unsigned flags;
-    int first = files_options(sh, argc, argv, "r", &flags, use);
+    int first = files_options(sh, argc, argv, "rRf", &flags, use);
     if (first < 0) return 1;
-    if (first == argc) return usage(sh, use);
+    bool recurse = flags & 3u, force = flags & 4u;
+    /* -f: a missing file, or no file at all, is not a mistake. */
+    if (first == argc) return force ? 0 : usage(sh, use);
     int status = 0;
     for (int i = first; i < argc && !sh->stop; i++) {
         if (!resolve(sh, "rm", argv[i], s_a)) {
@@ -843,8 +1022,9 @@ int cmd_rm(shell_t *sh, int argc, char **argv) {
             continue;
         }
         FRESULT r = files_stat(s_a, &s_fno);
+        if (force && (r == FR_NO_FILE || r == FR_NO_PATH)) continue;
         if (r == FR_OK && (s_fno.fattrib & AM_DIR)) {
-            if (!flags) {
+            if (!recurse) {
                 shell_error(sh, "rm: %s: is a directory (use rm -r)\n", argv[i]);
                 status = 1;
             } else {

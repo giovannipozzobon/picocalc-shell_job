@@ -1,5 +1,5 @@
-/* picocalc_shell.h — return from a program to the PicoCalc shell, and
- * the time it keeps.
+/* picocalc_shell.h — return from a program to the PicoCalc shell, the
+ * time it keeps, and the arguments it gives.
  *
  * SPDX-License-Identifier: GPL-3.0-or-later OR MIT
  *
@@ -20,7 +20,11 @@
  *         show_message("Cannot return to the shell");
  *
  * The program must close its files first: the reboot does not wait for
- * them. Holding Up, F1 or F5 at power-on also returns to the shell, for
+ * them. It need do nothing to return the user to their directory: the
+ * shell comes back to where it was. /.shell/ on the card is private to
+ * the shell: do not read, change or delete its files, which may change
+ * between versions, but for the one file a program that takes arguments
+ * is given (below). Holding Up, F1 or F5 at power-on also returns to the shell, for
  * any program. With the shell's patched loader (design.md M7), power-on
  * gives the shell with no key held, and Up, F1 or F5 the program; a
  * program's own watchdog_reboot(0, 0, 0) starts it again under either
@@ -49,6 +53,32 @@
  * set it except through picocalc_shell_set_time(), or write POWMAN
  * scratch 0-2.
  *
+ * The arguments (design.md §3.5): with `pico-oric -t game.tap`, or `PICO-ORIC
+ * /T GAME.TAP` in the shell's DOS flavour, the shell gives the words to a
+ * program that says it takes them, in one line of a source file that is
+ * sure to be linked (the one with main):
+ *
+ *     PICOCALC_SHELL_TAKES_ARGS("pico-oric");
+ *
+ * Any other program is refused, so a word is never silently dropped. At its
+ * start the program reads PICOCALC_SHELL_ARGS_FILE with its own FatFs,
+ * removes it, and hands the text to the functions below, which need no
+ * FatFs:
+ *
+ *     static char text[PICOCALC_SHELL_ARGS_SIZE];
+ *     ... read the file into text, len its length, and f_unlink it ...
+ *     picocalc_shell_args_t args;
+ *     if (picocalc_shell_args_parse(text, len, "pico-oric", &args)) {
+ *         char path[256];
+ *         if (picocalc_shell_args_option(&args, 't', path, sizeof path)) load_tape(path);
+ *         if (picocalc_shell_args_option(&args, 'd', path, sizeof path)) load_disc(path);
+ *     }
+ *
+ * There is a file at every start by the shell, with or without arguments,
+ * so args.dir always tells the program the user's directory. There is none
+ * when the loader's menu or a power-on starts the program, which then starts
+ * as it would with no arguments.
+ *
  * The loader's values below are UF2 Loader's
  * (common/bootloader/proginfo.c); the shell's src/port/loader.c checks
  * it agrees with them, and src/port/clock.c with the clock's.
@@ -57,6 +87,9 @@
 #define PICOCALC_SHELL_H
 
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <string.h>
 
 #include "hardware/gpio.h"
 #include "hardware/structs/qmi.h"
@@ -113,8 +146,6 @@ static inline bool picocalc_shell_exit(void) {
 #endif
 
 #ifdef PICOCALC_SHELL_HAS_TIME
-#include <stdint.h>
-
 #include "hardware/powman.h"
 
 /* The record: scratch[0] the magic, scratch[2] ~(scratch[0] ^
@@ -161,5 +192,158 @@ static inline void picocalc_shell_set_time(int64_t utc_ms) {
     powman_hw->scratch[2] = ~(PICOCALC_SHELL_CLOCK_MAGIC ^ bits);
 }
 #endif /* PICOCALC_SHELL_HAS_TIME */
+
+/* ---- arguments ------------------------------------------------------- */
+
+#define PICOCALC_SHELL_ARGS_FILE "/.shell/args"
+/* The most the file can hold, so a buffer of this size always has it. */
+#define PICOCALC_SHELL_ARGS_SIZE 4700u
+
+/* The record, found by the shell in the program's UF2 while it checks the
+ * file. Aligned to its size, it lies whole in one UF2 block. */
+#define PICOCALC_SHELL_ARGS_RECORD 64u
+#define PICOCALC_SHELL_ARGS_MAGIC0 0x9a3f6c1du
+#define PICOCALC_SHELL_ARGS_MAGIC1 0x5e8b27f4u
+#define PICOCALC_SHELL_ARGS_NAME   (PICOCALC_SHELL_ARGS_RECORD - 8u)
+
+typedef struct {
+    uint32_t magic[2];
+    char     name[PICOCALC_SHELL_ARGS_NAME];
+} picocalc_shell_args_record_t;
+
+#ifdef __cplusplus
+#define PICOCALC_SHELL_STATIC_ASSERT static_assert
+#else
+#define PICOCALC_SHELL_STATIC_ASSERT _Static_assert
+#endif
+PICOCALC_SHELL_STATIC_ASSERT(sizeof(picocalc_shell_args_record_t) == PICOCALC_SHELL_ARGS_RECORD,
+                             "the record's size");
+
+/* Nothing in the program reads the record, so the linker's --gc-sections
+ * would drop it, and the Arm toolchain ignores the `retain` attribute. A
+ * constructor that only names it keeps it, since every linker script keeps
+ * .init_array; it does nothing else, in a few instructions before main. The
+ * name is the one picocalc_shell_args_parse is given, so renaming the UF2
+ * changes nothing. */
+#define PICOCALC_SHELL_TAKES_ARGS(program_name)                                           \
+    __attribute__((used, aligned(PICOCALC_SHELL_ARGS_RECORD),                             \
+                   section(".rodata.picocalc_shell_args")))                               \
+    static const picocalc_shell_args_record_t picocalc_shell_args_record = {              \
+        { PICOCALC_SHELL_ARGS_MAGIC0, PICOCALC_SHELL_ARGS_MAGIC1 }, program_name          \
+    };                                                                                    \
+    __attribute__((constructor)) static void picocalc_shell_args_keep(void) {             \
+        __asm__ volatile("" : : "r"(&picocalc_shell_args_record));                        \
+    }                                                                                     \
+    PICOCALC_SHELL_STATIC_ASSERT(sizeof(program_name) > 1 &&                              \
+                                     sizeof(program_name) <= PICOCALC_SHELL_ARGS_NAME,    \
+                                 "the name is 1 to 55 characters")
+
+typedef struct {
+    bool        dos;      /* the shell's flavour: words are in DOS's spelling */
+    const char *dir;      /* the user's directory, always with '/' */
+    const char *program;  /* the program's own path on the card */
+    const char *name;     /* the name it declared */
+    int         argc;     /* how many words follow its name */
+    const char *words;    /* those words, each NUL-ended, one after another */
+} picocalc_shell_args_t;
+
+/* Split the file's `len` bytes of `text`, in place. False, with `text` no
+ * longer to be used, unless it is a whole file of a version known here and
+ * meant for the program called `name`; ignore such a file. The pointers in
+ * `args` are into `text`. */
+static inline bool picocalc_shell_args_parse(char *text, size_t len, const char *name,
+                                             picocalc_shell_args_t *args) {
+    if (len == 0 || text[len - 1] != '\n' || memchr(text, 0, len)) return false;
+    const char *line[5] = { 0 };
+    int n = 0;
+    char *end = text + len;
+    char *p = text;
+    args->argc = 0;
+    args->words = end;
+    while (p < end) {
+        char *lf = (char *)memchr(p, '\n', (size_t)(end - p));
+        *lf = '\0';
+        if (n < 5) {
+            line[n++] = p;
+        } else if (args->argc++ == 0) {
+            args->words = p;
+        }
+        p = lf + 1;
+    }
+    if (n < 5 || strcmp(line[0], "picocalc-args 1") != 0) return false;
+    if (strcmp(line[1], "unix") != 0 && strcmp(line[1], "dos") != 0) return false;
+    if (line[2][0] != '/' || line[3][0] != '/' || strcmp(line[4], name) != 0) return false;
+    args->dos = line[1][0] == 'd';
+    args->dir = line[2];
+    args->program = line[3];
+    args->name = line[4];
+    return true;
+}
+
+/* The i-th word as typed, from 0, or NULL. */
+static inline const char *picocalc_shell_args_word(const picocalc_shell_args_t *args, int i) {
+    if (i < 0 || i >= args->argc) return NULL;
+    const char *w = args->words;
+    while (i--) w += strlen(w) + 1;
+    return w;
+}
+
+/* `word`, a file as typed, as a full path from the user's directory, by the
+ * flavour's rules: DOS separates names with '\\' and refuses '/', which is its
+ * switch character, and takes C: but not another drive. False if it cannot
+ * be, or does not fit `size` bytes. Whether the
+ * file exists is for the program to find out. */
+static inline bool picocalc_shell_args_path(const picocalc_shell_args_t *args, const char *word,
+                                            char *out, size_t size) {
+    if (!word[0] || size < 2) return false;
+    if (args->dos && strchr(word, '/')) return false;
+    if (args->dos && word[1] == ':') {
+        if (word[0] != 'C' && word[0] != 'c') return false;
+        word += 2;
+    }
+    bool rooted = word[0] == (args->dos ? '\\' : '/');
+    const char *part[2] = { rooted ? "" : args->dir, word };
+    size_t len = 0;
+    for (int i = 0; i < 2; i++) {
+        const char *s = part[i];
+        while (*s) {
+            const char *e = s;
+            while (*e && *e != '/' && !(args->dos && *e == '\\')) e++;
+            size_t n = (size_t)(e - s);
+            if (n == 2 && s[0] == '.' && s[1] == '.') {
+                while (len > 0 && out[len - 1] != '/') len--;
+                if (len > 0) len--;   /* the '/' before it */
+            } else if (n > 0 && !(n == 1 && s[0] == '.')) {
+                if (len + 1 + n >= size) return false;
+                out[len++] = '/';
+                memcpy(out + len, s, n);
+                len += n;
+            }
+            s = *e ? e + 1 : e;
+        }
+    }
+    if (len == 0) out[len++] = '/';
+    out[len] = '\0';
+    return true;
+}
+
+/* The file given with the option `letter`, as a full path: `-t name` exactly
+ * in the UNIX flavour, `/t name` or `/T name` in DOS's. The first if it was
+ * given more than once, as `-t *.tap` is, with each match a word. False if
+ * it was not given, or has no word after it, or the path cannot be made. */
+static inline bool picocalc_shell_args_option(const picocalc_shell_args_t *args, char letter,
+                                              char *out, size_t size) {
+    char mark = args->dos ? '/' : '-';
+    char folded = letter >= 'a' && letter <= 'z' ? (char)(letter - 'a' + 'A') : letter;
+    for (int i = 0; i + 1 < args->argc; i++) {
+        const char *w = picocalc_shell_args_word(args, i);
+        if (w[0] != mark || !w[1] || w[2]) continue;
+        char c = w[1];
+        if (args->dos && c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
+        if (c == (args->dos ? folded : letter))
+            return picocalc_shell_args_path(args, picocalc_shell_args_word(args, i + 1), out, size);
+    }
+    return false;
+}
 
 #endif /* PICOCALC_SHELL_H */

@@ -52,6 +52,11 @@ static vi_t    ed;
 static char    s_buf[VI_BUF_SIZE];
 static char    s_copy[VI_COPY_SIZE];
 static char    s_undo[VI_UNDO_SIZE];
+
+char *vi_scratch(size_t *size) {
+    *size = sizeof s_buf;
+    return s_buf;
+}
 static uint8_t s_shown[TERM_ROWS][TERM_COLS];   /* what the screen shows */
 static uint8_t s_row[TERM_COLS];
 static char    s_out[TERM_COLS * 6 + 32];       /* one row's escape sequences */

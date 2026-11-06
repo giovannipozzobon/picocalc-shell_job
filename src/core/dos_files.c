@@ -14,6 +14,7 @@
 #include "clock.h"
 #include "dos.h"
 #include "files.h"
+#include "line.h"
 #include "path.h"
 
 static DIR     s_dir;              /* the directory being listed or matched */
@@ -60,7 +61,9 @@ static bool where(shell_t *sh, const char *arg, char *out) {
         return false;
     }
     if (dos_resolve(out, sh->cwd, arg)) return true;
-    dos_error(sh, "Invalid path", arg);
+    const char *slash = strchr(arg, '/');
+    if (slash) dos_error(sh, "Invalid switch", slash);
+    else dos_error(sh, "Invalid path", arg);
     return false;
 }
 
@@ -460,8 +463,19 @@ typedef struct {
     bool to_dir;        /* a directory to copy into */
     const char *mask;   /* or a wildcard for the new names, or NULL */
     bool list;          /* name each file, as DOS did for several */
+    int device;         /* or a device, not a file: DEV_CON or DEV_NUL */
     unsigned copied;
 } copy_t;
+
+enum { DEV_NONE, DEV_CON, DEV_NUL };
+
+/* The device COPY's operand names: CON or NUL, with DOS's ':' or not.
+ * Only COPY's: elsewhere, but for > NUL, these are names of files. */
+static int copy_device(const char *arg) {
+    if (path_same(arg, "CON") || path_same(arg, "CON:")) return DEV_CON;
+    if (path_same(arg, "NUL") || path_same(arg, "NUL:")) return DEV_NUL;
+    return DEV_NONE;
+}
 
 /* One file to dst, keeping its date and time, as DOS's COPY and XCOPY
  * did; DOS's error and -1 to stop, or 0. */
@@ -506,6 +520,68 @@ static int copy_each(shell_t *sh, const char *path, const FILINFO *fno, void *ct
     if (copy_one(sh, path, s_to) < 0) return -1;
     c->copied++;
     return 0;
+}
+
+/* COPY file CON and COPY file NUL: read to the screen, or to nothing. */
+static int read_each(shell_t *sh, const char *path, const FILINFO *fno, void *ctx) {
+    copy_t *c = ctx;
+    if (fno->fattrib & AM_DIR) return 0;
+    if (c->list) out_printf(&sh->con, "%s\n", fno->fname);
+    const char *why = files_read_out(sh, path, c->device == DEV_CON ? &sh->con : NULL);
+    if (why == FILES_STOPPED) return -1;
+    if (why) {
+        dos_error(sh, dos_say(why), show(path));
+        return -1;
+    }
+    c->copied++;
+    return 0;
+}
+
+/* COPY CON to `to`, a file through name.new, or a device: lines typed,
+ * ended with CR LF, until Ctrl+Z. Stopped, nothing is put in place. COPY
+ * NUL has nothing to read, so a file comes out empty. */
+static int copy_from_device(shell_t *sh, int from, const char *to, int to_device) {
+    static files_safe_t save;
+    if (from == DEV_CON && !sh->hooks.getkey) {
+        dos_error(sh, "Device not ready", "CON");
+        return 1;
+    }
+    if (!to_device) {
+        const char *err = files_safe_open(&save, to);
+        if (err) {
+            dos_error(sh, dos_say(err), show(to));
+            return 1;
+        }
+    }
+    int got = from == DEV_CON ? 1 : 0;
+    while (got > 0) {
+        got = line_read_text(sh);
+        if (got < 0) break;
+        const char *text = sh->line.text;
+        size_t n = strlen(text);
+        if (!to_device) {
+            files_safe_write(&save, text, n);
+            if (got) files_safe_write(&save, "\r\n", 2);
+            if (save.why) break;
+        } else if (to_device == DEV_CON && (got || n)) {
+            out_printf(&sh->con, "%s\n", text);
+        }
+    }
+    /* Stopped: the shell says ^C, and DOS said nothing more. */
+    if (got < 0) {
+        if (!to_device) files_safe_abort(&save);
+        return 1;
+    }
+    unsigned copied = 1;
+    if (!to_device) {
+        const char *err = files_safe_commit(&save);
+        if (err) {
+            dos_error(sh, dos_say(err), show(to));
+            copied = 0;
+        }
+    }
+    out_printf(&sh->out, "%9u file(s) copied\n", copied);
+    return copied ? 0 : 1;
 }
 
 /* COPY NAME+,, gives each file the time now, as touch does: left as it
@@ -566,7 +642,27 @@ int dos_copy(shell_t *sh, int argc, char **argv) {
         return found > 0 && c.copied == (unsigned)found ? status : 1;
     }
     if (dos_too_many(sh, argc, argv, 3)) return 1;
-    if (!spec(sh, argv[1], true, &sp) || !where(sh, argc == 3 ? argv[2] : ".", s_b)) return 1;
+    int from = copy_device(argv[1]);
+    int to = argc == 3 ? copy_device(argv[2]) : DEV_NONE;
+    if (from && argc == 2) {
+        dos_error(sh, "File cannot be copied onto itself", NULL);
+        return 1;
+    }
+    if (from) {
+        if (!to && !where(sh, argv[2], s_b)) return 1;
+        return copy_from_device(sh, from, s_b, to);
+    }
+    if (!spec(sh, argv[1], true, &sp)) return 1;
+    if (to) {
+        copy_t c = { .list = sp.wild, .device = to };
+        int status = 0;
+        int found = each(sh, &sp, 0, read_each, &c, &status);
+        if (found == 0) dos_error(sh, "File not found", argv[1]);
+        if (!sh->at_bol) out_puts(&sh->con, "\n");
+        out_printf(&sh->out, "%9u file(s) copied\n", c.copied);
+        return found > 0 && c.copied == (unsigned)found ? status : 1;
+    }
+    if (!where(sh, argc == 3 ? argv[2] : ".", s_b)) return 1;
     copy_t c = { .to = s_b, .list = sp.wild };
     if (dos_wild(path_base(s_b))) c.mask = path_base(s_b);
     else c.to_dir = files_is_dir(s_b);

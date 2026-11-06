@@ -14,6 +14,14 @@
 /* $PATH's default: where programs are looked for (design.md §4.3). */
 #define SHELL_PROGRAM_DIR "/pico2-apps"
 #define SHELL_PROGRAM_EXT ".uf2"
+
+/* Where a command's name would be run from, or NULL, saying nothing: a
+ * program or a script, as `which` shows. */
+const char *run_which(shell_t *sh, const char *name);
+
+/* The script a command's name means in the UNIX flavour, or NULL: a path
+ * to a file named .sh or starting #!, or a name ending .sh on $PATH. */
+const char *run_script_path(shell_t *sh, const char *name);
 /* The loader's own menu, kept beside the shell (design.md §3.2). */
 #define SHELL_MENU_UF2 "/BOOT2350.ORG"
 

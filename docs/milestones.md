@@ -16,6 +16,162 @@ Each entry gives:
 - a **not checked** list, carried forward until something checks each item
   or a decision drops it.
 
+## M13 — Program arguments (branch `m13-args`, 2026-11-04, done 2026-11-05)
+
+**Done.** §3.5's *Done when* asked for a power cut between the write and the program. The
+owner cannot make one: the power button is soft, and takes over a second to cut the power,
+and the window is milliseconds. The owner accepted the cut simulated over SWD (below) in its
+place, 2026-11-05.
+
+**Checked on the board:** Claude, on the Plus 2 W on the probe (RP2350B,
+`7458DC82A89AAC12`), its test card (`PLUS 2 W`, FAT32), under M7's patched stage3
+(`2.5-shell`), 2026-11-04, the W development builds of `v1.2-2-gc074b1b-dirty`
+installed as `/BOOT2350.UF2` and started by stage3, `args-test` and `args-ram` in
+`/bin`, driven and read over UART0, in `out/m13-*.log`. In each flavour, from a
+subdirectory:
+
+- From flash and from RAM, the flavour, directory, card-spelled path, declared name,
+  words and full paths arrive as sent; with no words, the directory still does.
+- `atom`, an older program, is refused; so is a redirection, and a pipe (UNIX); none
+  writes `/.shell/args`.
+- A key returns to the shell in the same directory with the file gone.
+- `echo stale > /.shell/args` with `args.new`, then `reboot`: both gone at the next start.
+- UNIX: a watchdog reboot with no command, as a program's own restart, starts
+  `args-test` with no file (it says so); with a stale file, it ignores and removes it.
+- DOS: `ARGS-TEST/T GAME.TAP`; a batch file's `@ARGS-TEST /T %1`; `D:\X` and `/A/B`
+  give no path; `CD /HOME`, `TYPE GO/A.TXT`, `MD /NEWDIR` say `Invalid switch`;
+  `/BIN/ARGS-TEST` and `C:/BIN/ARGS-TEST` say `Bad command or file name`.
+
+**Under the stock loader,** the same day and board: stock 2.5 built for 16 MB
+(`tools/build-loader.sh --stock 16`) written at offset 0 over SWD, and read back, with
+the app partition unchanged (HW §7.2's `ATRANS` note). `info` said `UF2 Loader 2.5`. In
+both flavours, from flash and RAM (`out/m13-stock-*.log`): the same words and paths;
+the refusals; the file gone on return, with the directory kept; a batch file (DOS);
+planted `args` and `args.new` gone at the next start; and a no-command reboot, with no
+file and with a stale one. The DOS flavour also ran the no-word start, the pipe's
+refusal, `args.new` and the no-command reboots here, which the patched runs left out.
+The patched stage3 was then written back, its first 16 KB identical to what was saved
+(`out/m13-plus2w-flash-before-stock.bin`), and `args-test -t a.tap` ran under it.
+
+**A cut simulated over SWD,** the same day and board, patched stage3, UNIX W development
+build, with a hardware breakpoint on core 0 (`set USE_CORE 0`: with both cores, OpenOCD
+often failed to attach, and a reset in the session that had stopped left the board silent
+until a new session reset it), in `out/m13-cut-*.log`:
+
+- Stopped at `f_rename`, `r0` reading `/.shell/args.new`: the file written, not yet
+  renamed. Reset: the shell came up with only `history` in `/.shell`.
+- Stopped at `shell_keep_cwd`, just after `/.shell/args` was committed. Reset: the same.
+- Stopped there, then a no-command reboot, which starts the program as power-on does under
+  the stock loader: `args-test` read the whole file, words and paths right, and removed it.
+
+In the first two the shell came back to `/home`, not the directory left, since the
+directory is written after the stop. A reset leaves the card powered, which a real cut would
+not, and stops the shell between FatFs calls, not during a card write.
+
+**The owner,** on the same board and card, patched stage3, 2026-11-05: `args-test` started at
+power-on with F1 held says it has no file, and from the loader's menu both `args-test` and
+`args-ram` say the same. Started by the shell with words, `args-test` showed them on the panel.
+
+**A real program, in the release builds.** The owner, on a Plus 2, 2026-11-05, reported: the
+release builds of both flavours, with pico-oric changed to take arguments (not yet committed
+in its repository). Given the options for a tape and a disc, pico-oric received them and set
+itself up as asked.
+
+The card now has the M13 UNIX W development shell as `/BOOT2350.UF2` and the two test
+programs in `/bin`; what it held before is in `out/m13-card-before/`. Flash's app
+partition holds `args-test`.
+
+**Checked on the host.** 31 of 31 under CTest. The new `test_args` and
+`test_args_dos`, each over FAT16 and FAT32, cover: the record at every aligned
+place in a UF2, flash and RAM, and not found off its alignment, with half its
+magic, with a bad name or in another chip's block; each refusal, with no flash or
+card write; `/.shell/args` byte for byte, with a failed write at every write it
+takes stopping the start; what is left removed by the next `shell_start`; each
+flavour's words; and the header's parser, options and path rules. With
+`tools/fetch-suites.sh` run, the record is found in the real `args-test.uf2` and
+`args-ram.uf2` and absent from `pico-ace.uf2` and the loader's menu.
+
+Faults the tests and the real build caught while it was built:
+
+- `retain` is ignored by the Arm toolchain (`-Werror=attributes`), which would have
+  lost the record to `--gc-sections`; the macro keeps it with a constructor (§3.5).
+- `f_stat` gives a long name back as typed, so `/PICO2-APPS/DECL.UF2` gave the
+  program the typed spelling; `files_chdir`'s walk through the listings is now
+  `files_spelled`, which both use.
+- The DOS parser's first version of `NAME/T` also cut `/PICO2-APPS/OLD` at its second
+  `/`.
+- Removing `/` as a DOS separator (the owner, 2026-11-04) stopped every batch file
+  found by name: `open_batch` sent its absolute card path back through the typed-word
+  resolver. It now uses `files_open_path`; `test_dos_time`'s `\\ASK` caught it.
+- A RAM program whose 8.3 path passed the limit left `/.shell/args` behind with the program
+  not started, where the loader's menu could give it to a program of the same declared name
+  (Copilot's review of the PR, 2026-11-05). The short path now comes before anything is
+  written, and `test_args` covers it. Not run on the board: it needs a path 60 directories deep.
+
+**Memory** (SDK 2.3.1, the development UNIX build): text 189,564 to 190,640 bytes,
+1,076 more; bss 287,488 to 287,744, 256 more for the program's path; 478,384 in all. The
+other builds, text + bss, before those 260 bytes:
+DOS 448,656; release UNIX 474,468; release DOS 445,008; W UNIX 480,384; W DOS 451,192.
+All built under `-Werror`; `picotool info -a` still reads `args-test.uf2`.
+
+**Not checked:**
+
+- Power-on and the menu under the stock loader, and with Up or F5 held; the no-command
+  reboot above takes the same path in the program.
+- A real power cut between the write and the program, for the reason above: the card losing
+  power, and a cut during a card write, are what the simulation leaves out.
+- Earlier records that the Plus 2 W's flash held a program "at offset 0" (M7, M12's
+  2026-10-22 and 2026-10-25 notes in CLAUDE.md) may be this mapping and not the flash:
+  those saves were read after a `reset halt`. Not looked into.
+- The time the extra card write and the path's walk add to each start: an estimate of
+  a few milliseconds, not measured.
+
+The emulators adopting it is their own repositories' work (§3.5).
+
+## Closer to DOS and to UNIX (not a milestone; branches `dos-closer`, `unix-comfort`, 2026-11-04)
+
+**Checked on the board:** Claude, on the Plus 2 W on the probe (RP2350B), its
+card (`PLUS 2 W`, FAT32), 2026-11-04, release builds of `fa50cf7` run from SRAM
+over SWD, typed with `tools/swd-drive.py` and read from the terminal's grid. In
+a new directory, removed afterwards:
+
+- DOS: `COPY CON` ended by 0x1A and by F6, Esc dropping a line, Ctrl-C keeping
+  the old file; `COPY` to `CON` and `NUL`, from `NUL`, and with a wildcard; the
+  search order in one directory and across `PATH`; a program by `NAME.UF2` and
+  by a path with no extension; Tab; `HELP COPY`.
+- UNIX: `2>`, `2>&1` into a file and a pipe, `>&2`; `./s.sh`; `mv -f`, `rm -f`,
+  `rm -rf`, `cp -R`; `~`, `cd -`, `$PWD`, `$OLDPWD`; `exit` in a script and at the
+  prompt; Ctrl-W and Ctrl-L as key codes; `test`, `[`, `which`, `less`, `tee`,
+  `find`, `uniq`, `sort`; vi opening a file straight after `sort` used its buffer.
+- Both: after a real `reboot`, then the new image loaded again, the shell came
+  back to the directory left and removed `/.shell/cwd`; loaded once more, it
+  started in the default directory.
+- `sort`: 59,228 B of 2,496 lines into a file in at most 0.8 s, `cat` the same in
+  0.6 s; 88,842 B refused. Timed from the Mac, to a few tenths of a second.
+
+**Checked by the owner,** on a Plus 2 or a Plus 2 W (which for each check is not
+recorded), from the card, 2026-11-04:
+
+- the UNIX flavour: Ctrl-W and Ctrl-L from the keyboard; a program run and come
+  back, with the current directory restored and no delay noticed (not timed);
+- the DOS flavour: `copy con: newtest.txt` ended with Ctrl+Z and `copy con
+  nt2.txt` ended with F6, from the keyboard, both writing the content; a program
+  run and come back, to the directory left; a `CD` in `AUTOEXEC.BAT` setting the
+  directory at power-on, and not on coming back from a program; switching off
+  inside a program, then on and back to the shell, to the directory left;
+  `poweroff` at the prompt, then power-on, to the directory of that `CD`.
+
+**Checked by the owner,** on a Plus 2, from the card, 2026-11-04, the UNIX
+flavour: `poweroff` as expected; a power cycle from the shell; a power cycle
+inside a program, restoring the directory left.
+
+**The owner,** 2026-11-05, reported that a `cd` in `/etc/profile` works as expected
+beside a kept directory in the UNIX flavour.
+
+**Not checked:** the card write's cost in the time to come back, as a
+measurement. The power switch at the prompt in the DOS flavour, which writes
+nothing, as `poweroff` does not (host test only). A Pico 2 or a Pico 2 W.
+
 ## M16 — The mouse in the shell, step 1: the wheel (2026-11-02, branch `m15-hdmi`)
 
 **Built 2026-11-02; the owner tried the wheel on the board the same day: it scrolls the history and works in vi** (design.md §3.12). The owner ran

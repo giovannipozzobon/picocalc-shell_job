@@ -399,6 +399,35 @@ else()
     pico_enable_stdio_usb(clock-test 0)
     pico_add_extra_outputs(clock-test)
 
+    # A program that shows what the shell gave it, from flash and from RAM:
+    # the board check of program arguments, and the proof the record survives
+    # the link's --gc-sections (design.md §3.5).
+    foreach(t args-test args-ram)
+        add_executable(${t}
+            test/pico/args_test.c
+            src/port/diskio.c
+            src/port/kbd.c
+            src/port/lcd.c
+            src/port/screen.c
+            src/port/sd.c
+            src/port/southbridge.c
+        )
+        target_include_directories(${t} PRIVATE include src/port)
+        target_compile_options(${t} PRIVATE ${SHELL_WARNINGS})
+        target_compile_definitions(${t} PRIVATE
+            PICO_SHELL_LCD_SPI_HZ=${PICO_SHELL_LCD_SPI_HZ}
+            PICO_CLOCK_ADJUST_PERI_CLOCK_WITH_SYS_CLOCK=1
+            PICO_DEFAULT_UART=0
+            PICO_DEFAULT_UART_TX_PIN=2
+            PICO_DEFAULT_UART_RX_PIN=3
+        )
+        target_link_libraries(${t} shell_core pico_stdlib hardware_dma hardware_i2c hardware_spi)
+        pico_enable_stdio_uart(${t} 1)
+        pico_enable_stdio_usb(${t} 0)
+        pico_add_extra_outputs(${t})
+    endforeach()
+    pico_set_binary_type(args-ram no_flash)
+
     # A flash program that sets the DS3231's EOSC, so the chip loses its
     # time at the next power-off: the board check of a PicoCalc with no
     # clock source, where the chip cannot be taken out (design.md §3.8).

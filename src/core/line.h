@@ -44,4 +44,11 @@ bool line_key(shell_t *sh, int key);
  * makes sure there is a keyboard (sh->hooks.getkey). */
 int line_read(shell_t *sh, const char *prompt);
 
+/* A line of text typed for DOS's COPY CON, into sh->line.text: 1; 0 at
+ * Ctrl+Z or F6, or the end of the input, with what was typed before it
+ * still in sh->line.text; -1 when stopped by Break or Ctrl-C, with
+ * sh->stop set. Esc only drops the line, as at the prompt. The caller
+ * makes sure there is a keyboard (sh->hooks.getkey). */
+int line_read_text(shell_t *sh);
+
 #endif /* SHELL_LINE_H */

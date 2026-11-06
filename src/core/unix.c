@@ -1,13 +1,14 @@
 /* unix.c — the UNIX flavour's command language (flavour.h; design.md
  * §4.4): the parser (parse.h) and expansion (expand.h), `;`, `&&` and
  * `||`, NAME=value, `sh` scripts and /etc/profile, and its builtins:
- * the file commands (files.h), `more`, `grep`, `head`, `tail` and `wc`
+ * the file commands (files.h), `more`, `grep`, `head`, `tail`, `wc`, `uniq` and `sort`
  * (text.h), the PicoCalc's own (system.h), `echo`, `set`, `unset`,
- * `export`, `sh`, `history`, `menu`, `usbdisk`, `vi` and `view` (vi.h);
+ * `export`, `sh`, `exit`, `test`, `which`, `history`, `menu`, `usbdisk`, `vi` and `view` (vi.h);
  * and `select` with `break`, its one compound command. */
 
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "clock.h"
@@ -32,6 +33,14 @@
 static int script(shell_t *sh, const char *name);
 static int cmd_select(shell_t *sh, int argc, char **argv);
 static int cmd_break(shell_t *sh, int argc, char **argv);
+static int cmd_exit(shell_t *sh, int argc, char **argv);
+
+/* `exit` ran: the rest of the line, and of its script, is dropped. */
+static bool s_exit;
+
+static void banner(shell_t *sh) {
+    out_printf(&sh->con, "\033[1mPicoCalc shell\033[0m %s\n\n", sh->version);
+}
 
 /* ---- commands --------------------------------------------------------- */
 
@@ -103,6 +112,104 @@ static int cmd_export(shell_t *sh, int argc, char **argv) {
     return status;
 }
 
+static int cmd_true(shell_t *sh, int argc, char **argv) {
+    (void)sh;
+    (void)argc;
+    (void)argv;
+    return 0;
+}
+
+static int cmd_false(shell_t *sh, int argc, char **argv) {
+    (void)sh;
+    (void)argc;
+    (void)argv;
+    return 1;
+}
+
+/* A whole decimal number, or false with the error printed. */
+static bool test_number(shell_t *sh, const char *s, long *n) {
+    char *end;
+    *n = strtol(s, &end, 10);
+    if (*s && !*end) return true;
+    shell_error(sh, "test: %s: not a number\n", s);
+    return false;
+}
+
+/* 0 true, 1 false, 2 a mistake. */
+static int test_eval(shell_t *sh, int n, char **a) {
+    if (n == 0) return 1;
+    if (strcmp(a[0], "!") == 0 && n > 1) {
+        int st = test_eval(sh, n - 1, a + 1);
+        return st == 2 ? 2 : !st;
+    }
+    if (n == 1) return a[0][0] ? 0 : 1;
+    if (n == 2) {
+        const char *op = a[0];
+        if (strcmp(op, "-n") == 0) return a[1][0] ? 0 : 1;
+        if (strcmp(op, "-z") == 0) return a[1][0] ? 1 : 0;
+        if (strchr("efdsrw", op[1]) && op[0] == '-' && op[1] && !op[2]) {
+            static char path[SHELL_PATH_MAX + 1];
+            static FILINFO fno;
+            if (!path_resolve(path, sh->cwd, a[1])) return 1;
+            bool root = strcmp(path, "/") == 0;
+            if (!root && files_stat(path, &fno) != FR_OK) return 1;
+            bool dir = root || (fno.fattrib & AM_DIR);
+            switch (op[1]) {
+            case 'f': return dir ? 1 : 0;
+            case 'd': return dir ? 0 : 1;
+            case 's': return !dir && fno.fsize > 0 ? 0 : 1;
+            default:  return 0;
+            }
+        }
+    } else if (n == 3) {
+        const char *op = a[1];
+        if (strcmp(op, "=") == 0 || strcmp(op, "==") == 0) return strcmp(a[0], a[2]) ? 1 : 0;
+        if (strcmp(op, "!=") == 0) return strcmp(a[0], a[2]) ? 0 : 1;
+        static const char ops[][4] = { "-eq", "-ne", "-lt", "-le", "-gt", "-ge" };
+        for (unsigned k = 0; k < 6; k++) {
+            if (strcmp(op, ops[k]) != 0) continue;
+            long x, y;
+            if (!test_number(sh, a[0], &x) || !test_number(sh, a[2], &y)) return 2;
+            bool yes = k == 0 ? x == y : k == 1 ? x != y : k == 2 ? x < y
+                     : k == 3 ? x <= y : k == 4 ? x > y : x >= y;
+            return yes ? 0 : 1;
+        }
+    }
+    shell_error(sh, "test: not understood; see man test\n");
+    return 2;
+}
+
+static int cmd_test(shell_t *sh, int argc, char **argv) {
+    return test_eval(sh, argc - 1, argv + 1);
+}
+
+static int cmd_bracket(shell_t *sh, int argc, char **argv) {
+    if (argc < 2 || strcmp(argv[argc - 1], "]") != 0) {
+        shell_error(sh, "[: no closing ]\n");
+        return 2;
+    }
+    return test_eval(sh, argc - 2, argv + 1);
+}
+
+static int cmd_which(shell_t *sh, int argc, char **argv) {
+    if (argc < 2) {
+        shell_error(sh, "usage: which name...\n");
+        return 1;
+    }
+    int status = 0;
+    for (int i = 1; i < argc; i++) {
+        const char *path;
+        if (shell_is_builtin(argv[i])) {
+            out_printf(&sh->out, "%s: builtin\n", argv[i]);
+        } else if ((path = run_which(sh, argv[i])) != NULL) {
+            out_printf(&sh->out, "%s\n", path);
+        } else {
+            status = 1;
+        }
+    }
+    return status;
+}
+
 static int cmd_sh(shell_t *sh, int argc, char **argv) {
     if (argc != 2) {
         shell_error(sh, "usage: sh file\n");
@@ -122,24 +229,28 @@ const shell_builtin_t flavour_builtins[] = {
     { "bootsel",    cmd_bootsel,    "bootsel", "Reboot into bootloader mode (BOOTSEL)" },
     { "break",      cmd_break,      "break [N]", "Leaves a select, or N of them" },
     { "cat",        cmd_cat,        "cat file... (or cat < file)", "Concatenate and print files" },
-    { "cd",         cmd_cd,         "cd [dir]", "Change directory; $HOME with none" },
+    { "cd",         cmd_cd,         "cd [dir | -]", "Change directory; - for the last one" },
     { "clear",      cmd_clear,      "clear", "Clears the screen" },
-    { "cp",         cmd_cp,         "cp [-r] from... to", "Copies files, -r directories" },
+    { "cp",         cmd_cp,         "cp [-rRf] from... to", "Copies files, -r directories" },
     { "date",       cmd_date,       "date [-u] [mmddHHMM[[cc]yy]]", "Displays or sets the date and time" },
     { "df",         cmd_df,         "df", "Displays the card's size and free space" },
     { "echo",       cmd_echo,       "echo [-n] [word...]", "Print words; -n no line break" },
+    { "exit",       cmd_exit,       "exit [N]", "Ends a script; the prompt stays" },
     { "export",     cmd_export,     "export [NAME=value...]", "Displays, sets or lists variables" },
+    { "false",      cmd_false,      "false", "Does nothing, and fails" },
+    { "find",       cmd_find,       "find [path] [-name pattern] [-type f|d]", "Lists files in and below a directory" },
     { "grep",       cmd_grep,       "grep [-v] [-n] [-c] [-i] pattern [file...]", "File pattern searcher" },
     { "hdmi",       cmd_hdmi,       "hdmi", "Resends the screen to HDMI" },
     { "head",       cmd_head,       "head [-n N] [file...]", "Displays the first lines of a file" },
     { "history",    cmd_history,    "history", "Displays the lines typed" },
     { "info",       cmd_info,       "info", "Displays diagnostic information" },
+    { "less",       cmd_more,       "less file...", "The same as more" },
     { "ls",         cmd_ls,         "ls [-l] [-a] [path...]", "Lists directory contents" },
     { "man",        cmd_help,       "man [command]", "Display manual pages" },
     { "menu",       cmd_menu,       "menu", "UF2 Loader's menu" },
     { "mkdir",      cmd_mkdir,      "mkdir [-p] dir...", "Makes directories" },
     { "more",       cmd_more,       "more file... (or < file, or | more)", "Displays text a screen at a time" },
-    { "mv",         cmd_mv,         "mv from... to", "Move or rename" },
+    { "mv",         cmd_mv,         "mv [-f] from... to", "Move or rename" },
 #if SHELL_NTP
     { "ntp",        cmd_ntp,        "ntp [-f]", "Sets the clock from the network, once" },
 #endif
@@ -147,13 +258,19 @@ const shell_builtin_t flavour_builtins[] = {
     { "poweroff",   cmd_poweroff,   "poweroff", "Switches the PicoCalc off" },
     { "pwd",        cmd_pwd,        "pwd", "Print the current directory" },
     { "reboot",     cmd_reboot,     "reboot", "Restarts the shell" },
-    { "rm",         cmd_rm,         "rm [-r] path...", "Removes files, -r directories" },
+    { "rm",         cmd_rm,         "rm [-rRf] path...", "Removes files, -r directories" },
     { "rmdir",      cmd_rmdir,      "rmdir dir...", "Removes empty directories" },
     { "select",     cmd_select,     "select NAME in WORD...; do LIST; done", "Offers the words as a menu" },
     { "set",        cmd_set,        "set", "Lists the variables" },
     { "sh",         cmd_sh,         "sh file", "Runs a script" },
+    { "sort",       cmd_sort,       "sort [-r] [-n] [-u] [file...]", "Sorts lines, up to 64 KB" },
     { "tail",       cmd_tail,       "tail [-n N] [file...]", "Displays the last lines, 10 by default" },
+    { "tee",        cmd_tee,        "tee [-a] [file]", "Copies its input to a file as well" },
+    { "[",          cmd_bracket,    "[ expression ]", "The same as test" },
+    { "test",       cmd_test,       "test [!] -f|-d|-e|-s file\n  test [!] -n|-z text, or a = b, a != b\n  test [!] a -eq|-ne|-lt|-le|-gt|-ge b", "Checks a file, text or numbers" },
     { "touch",      cmd_touch,      "touch file...", "Creates empty files" },
+    { "true",       cmd_true,       "true", "Does nothing, and works" },
+    { "uniq",       cmd_uniq,       "uniq [-c] [-d] [file]", "Drops repeats of the line before" },
     { "unset",      cmd_unset,      "unset NAME...", "Removes variables" },
     { "usbdisk",    cmd_usbdisk,    "usbdisk", "Exposes the SD Card to a computer" },
     { "vi",         cmd_vi,         "vi [-R] file", "Edits a text file" },
@@ -162,6 +279,7 @@ const shell_builtin_t flavour_builtins[] = {
 #if SHELL_NTP
     { "web",        cmd_web,        "web", "Manages the SD Card from a browser" },
 #endif
+    { "which",      cmd_which,      "which name...", "Shows where a command is found" },
 };
 
 const unsigned flavour_nbuiltins = sizeof flavour_builtins / sizeof flavour_builtins[0];
@@ -174,6 +292,35 @@ static struct {
     parse_t  parse;
     expand_t exp;
 } s_frames[SHELL_DEPTH];
+
+/* Whether two names typed are one file. */
+static bool same_file(shell_t *sh, const char *a, const char *b) {
+    static char pa[SHELL_PATH_MAX + 1], pb[SHELL_PATH_MAX + 1];
+    return path_resolve(pa, sh->cwd, a) && path_resolve(pb, sh->cwd, b) && path_same(pa, pb);
+}
+
+/* A script run by its name is `sh name`: into e. False, with the error
+ * printed, if it cannot be. */
+static bool script_name(shell_t *sh, expand_t *e) {
+    if (shell_is_builtin(e->argv[0])) return true;
+    const char *path = run_script_path(sh, e->argv[0]);
+    if (!path) return true;
+    if (e->argc > 1) {
+        shell_error(sh, "%s: a script takes no arguments\n", e->argv[0]);
+        return false;
+    }
+    size_t n = strlen(path) + 1, k = sizeof "sh";
+    if (e->used + n + k > sizeof e->text) {
+        shell_error(sh, "shell: arguments too long\n");
+        return false;
+    }
+    e->argv[0] = memcpy(e->text + e->used, "sh", k);
+    e->argv[1] = memcpy(e->text + e->used + k, path, n);
+    e->argv[2] = NULL;
+    e->used += n + k;
+    e->argc = 2;
+    return true;
+}
 
 /* One command with its redirections, reading `from` and writing `to`
  * when it is in a pipeline. */
@@ -207,10 +354,75 @@ static int run_cmd(shell_t *sh, const parse_cmd_t *c, pipe_t *from, pipe_t *to) 
         return 1;
     }
     if (e->argc == 0) return 0;   /* only empty variables */
+    if (!script_name(sh, e)) return 1;
+
+    /* A program or what leaves the shell can leave no file behind. */
+    char *err = NULL;
+    if (c->err && !(err = expand_one(sh, c->err, strlen(c->err), e))) return 1;
+    if (err && !*err) {
+        shell_error(sh, "shell: a redirection with no file\n");
+        return 1;
+    }
+    bool err_null = err && strcmp(err, "/dev/null") == 0;
+    if (err && !err_null && shell_leaves(e->argv[0])) {
+        shell_error(sh, "%s: not with a redirection or a pipe\n", e->argv[0]);
+        return 1;
+    }
+    bool out_null = out && strcmp(out, "/dev/null") == 0;
+    if (err && !err_null && out && !out_null && same_file(sh, err, out)) {
+        shell_error(sh, "shell: %s: both > and 2>; use > %s 2>&1\n", out, out);
+        return 1;
+    }
+
+    const out_t saved_out = sh->out, saved_err = sh->err;
+    const bool saved_out_con = sh->out_is_con, saved_err_con = sh->err_is_con;
+    int status = 1;
+    pipe_t *empty = NULL;
+    /* < /dev/null is an input with nothing in it. */
+    if (in && strcmp(in, "/dev/null") == 0) {
+        const char *why;
+        if (!(empty = pipe_open(&why))) {
+            shell_error(sh, "shell: %s\n", why);
+            return 1;
+        }
+        from = empty;
+        in = NULL;
+    }
+    if (err_null) {
+        if (!shell_leaves(e->argv[0])) {
+            sh->err = shell_null_out;
+            sh->err_is_con = false;
+        }
+    } else if (err && !files_redirect_err(sh, err, c->err_append)) {
+        goto done;
+    }
+    if (c->err_to_out) {
+        if (c->err_to_file && out_null) {
+            sh->err = shell_null_out;
+            sh->err_is_con = false;
+        } else if (c->err_to_file) {
+            sh->err_to_out = true;
+        } else {
+            sh->err = to ? pipe_out(to) : sh->out;
+            sh->err_is_con = to ? false : sh->out_is_con;
+        }
+    }
+    if (c->out_to_err) {
+        sh->out = sh->err;
+        sh->out_is_con = sh->err_is_con;
+    }
     /* > /dev/null throws the output away; there is no /dev on the card. */
-    if (out && strcmp(out, "/dev/null") == 0)
-        return shell_command_null(sh, e->argc, e->argv, in, from, to);
-    return shell_command(sh, e->argc, e->argv, in, out, c->append, from, to);
+    status = out_null ? shell_command_null(sh, e->argc, e->argv, in, from, to)
+                      : shell_command(sh, e->argc, e->argv, in, out, c->append, from, to);
+    if (err && !err_null && !files_redirect_err_end(sh, &saved_err) && status == 0) status = 1;
+done:
+    sh->err_to_out = false;
+    sh->out = saved_out;
+    sh->out_is_con = saved_out_con;
+    sh->err = saved_err;
+    sh->err_is_con = saved_err_con;
+    if (empty) pipe_close(empty);
+    return status;
 }
 
 /* The k-th command of the pipeline that starts at `first`. */
@@ -364,7 +576,8 @@ again:
         if (kw != KW_DO) {
             if (i + 1 < p->ncmds && p->cmds[i + 1].sep != SEP_SEMI)
                 return mistake(sh, where, "only ; or a line's end may follow select's words or done");
-            if (c->in || c->out) return mistake(sh, where, "a select cannot be redirected");
+            if (c->in || c->out || c->out_to_err || c->err || c->err_to_out)
+                return mistake(sh, where, "a select cannot be redirected");
         }
         switch (kw) {
         case KW_SELECT:
@@ -515,7 +728,7 @@ static void run_select(shell_t *sh, compound_t *k, unsigned i, unsigned j) {
 
 /* Parts [i, end) of this level's select. */
 static int run_parts(shell_t *sh, compound_t *k, unsigned i, unsigned end) {
-    while (i < end && !sh->stop && !k->brk) {
+    while (i < end && !sh->stop && !k->brk && !s_exit) {
         const part_t *pt = &k->parts[i];
         if (pt->kind == PART_CMDS) {
             run_line(sh, k->text + pt->text, where_of(sh, k, pt->line));
@@ -594,9 +807,35 @@ static int cmd_break(shell_t *sh, int argc, char **argv) {
     return 0;
 }
 
+/* exit [N]: ends this script, the rest of it dropped, with N for $? or
+ * the last command's status. At the prompt there is nothing to end: the
+ * banner says the shell is still here, and nothing else changes. */
+static int cmd_exit(shell_t *sh, int argc, char **argv) {
+    int status = sh->status;
+    if (argc > 2) {
+        shell_error(sh, "usage: exit [N]\n");
+        return 2;
+    }
+    if (argc == 2) {
+        char *end;
+        long n = strtol(argv[1], &end, 10);
+        if (!*argv[1] || *end) {
+            shell_error(sh, "exit: %s: not a number\n", argv[1]);
+            status = 2;
+        } else {
+            status = (int)(n & 0xFF);
+        }
+    }
+    compound_t *k = &s_comp[sh->depth];
+    k->brk = k->loops;   /* out of any select */
+    s_exit = true;
+    if (sh->depth == 0) banner(sh);
+    return status;
+}
+
 static int run_parsed(shell_t *sh, const parse_t *p) {
     const compound_t *k = &s_comp[sh->depth];
-    for (int i = 0; i < p->ncmds && !sh->stop && !k->brk;) {
+    for (int i = 0; i < p->ncmds && !sh->stop && !k->brk && !s_exit;) {
         int end = i + 1;
         while (end < p->ncmds && p->cmds[end].sep == SEP_PIPE) end++;
         /* A pipeline skipped by && or || leaves the status as it was. */
@@ -611,7 +850,9 @@ static int run_parsed(shell_t *sh, const parse_t *p) {
 }
 
 int flavour_run_line(shell_t *sh, const char *line) {
-    return run_top(sh, line, NULL, 0, NULL);
+    int status = run_top(sh, line, NULL, 0, NULL);
+    s_exit = false;
+    return status;
 }
 
 /* Run the file `name` a line at a time at the level below, to its end
@@ -637,7 +878,8 @@ static int script(shell_t *sh, const char *name) {
     unsigned lineno = 0;
     bool whole = true;
     long n;
-    while (!sh->stop && (n = reader_line(&s_reader[d], s_text[d], sizeof s_text[d], &whole)) >= 0) {
+    while (!sh->stop && !s_exit &&
+           (n = reader_line(&s_reader[d], s_text[d], sizeof s_text[d], &whole)) >= 0) {
         bool piece = !whole;
         lineno++;
         while (!whole && reader_line(&s_reader[d], s_text[d], sizeof s_text[d], &whole) >= 0) {}
@@ -665,6 +907,7 @@ static int script(shell_t *sh, const char *name) {
     }
     f_close(&s_script[d]);
     sh->depth = d - 1u;
+    s_exit = false;   /* it ended this script, and no more */
     return status;
 }
 
@@ -677,7 +920,7 @@ void flavour_init(shell_t *sh) {
 }
 
 void flavour_start(shell_t *sh) {
-    out_printf(&sh->con, "\033[1mPicoCalc shell\033[0m %s\n\n", sh->version);
+    banner(sh);
     const char *note = clock_note();
     if (note) shell_error(sh, "shell: %s\n", note);
     script(sh, PROFILE);

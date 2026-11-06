@@ -147,7 +147,7 @@ int main(void) {
     /* ---- man ---- */
     CHECK(run("man") == 0, "man");
     CHECK(strncmp(con, "backlight  battery    bt\nbootsel    break      cat", 44) == 0, "columns: '%.60s'", con);
-    CHECK(strstr(con, "\n`man name` for one.") && strstr(con, "wc") && strstr(con, "web") && strstr(con, "tail"),
+    CHECK(strstr(con, "\n`man name` for one.") && strstr(con, "wc") && strstr(con, "web") && strstr(con, "which") && strstr(con, "tail"),
           "man: '%s'", con);
     for (unsigned i = 0; shell_builtin_at(i); i++) {
         char line[32];
@@ -253,6 +253,9 @@ int main(void) {
         /* The history was on the card before the port was asked. */
         CHECK(history_then && strstr(history_then, typed), "%s: history '%s'", leaves[i].name,
               history_then ? history_then : "(none)");
+        /* The directory is kept for a restart, not for switching off. */
+        CHECK(exists(CWD_FILE) == (leaves[i].what != SHELL_POWER_OFF), "%s: kept", leaves[i].name);
+        f_unlink(CWD_FILE);
         power_calls = 0;
         char line[48];
         snprintf(line, sizeof line, "%s > /p.txt", leaves[i].name);
@@ -266,6 +269,18 @@ int main(void) {
     }
     power_says = NULL;
     CHECK(run("reboot") == 1 && strstr(con, "reboot: it did not happen"), "no reason: '%s'", con);
+    f_unlink(CWD_FILE);
+
+    /* The start: $HOME; after a restart, the directory left, once. */
+    CHECK(f_mkdir("/home") == FR_OK && f_mkdir("/left") == FR_OK, "dirs");
+    shell_start(&sh);
+    CHECK(strcmp(sh.cwd, "/home") == 0, "home: %s", sh.cwd);
+    CHECK(run("cd /left") == 0, "cd");
+    shell_keep_cwd(&sh);
+    shell_start(&sh);
+    CHECK(strcmp(sh.cwd, "/left") == 0, "back: %s", sh.cwd);
+    shell_start(&sh);
+    CHECK(strcmp(sh.cwd, "/home") == 0, "only once: %s", sh.cwd);
 
     host_disk_close();
     TEST_DONE();

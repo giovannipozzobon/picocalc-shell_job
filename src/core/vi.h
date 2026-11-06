@@ -22,9 +22,15 @@
 #ifndef SHELL_VI_H
 #define SHELL_VI_H
 
+#include <stddef.h>
+
 #include "shell.h"
 
 int cmd_vi(shell_t *sh, int argc, char **argv);
 int cmd_view(shell_t *sh, int argc, char **argv);
+
+/* vi's text buffer, for a command to borrow while vi is not running: vi
+ * reads its file in afresh each time. */
+char *vi_scratch(size_t *size);
 
 #endif /* SHELL_VI_H */

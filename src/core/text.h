@@ -36,5 +36,7 @@ int cmd_grep(shell_t *sh, int argc, char **argv);
 int cmd_head(shell_t *sh, int argc, char **argv);
 int cmd_tail(shell_t *sh, int argc, char **argv);
 int cmd_wc(shell_t *sh, int argc, char **argv);
+int cmd_uniq(shell_t *sh, int argc, char **argv);
+int cmd_sort(shell_t *sh, int argc, char **argv);
 
 #endif /* SHELL_TEXT_H */

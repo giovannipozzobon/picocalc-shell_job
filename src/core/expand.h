@@ -5,6 +5,8 @@
  * runs:
  *   - `$NAME`, `${NAME}` and `$?` are replaced, outside single quotes. A
  *     `$` before anything else is itself. An unset variable is empty.
+ *   - `~` or `~/` starting a word, unquoted, is $HOME, and $PWD is always
+ *     the current directory.
  *   - quotes and escapes are removed.
  *   - a word with `*`, `?` or `[` outside quotes, in its last name, is a
  *     glob: it becomes the names in that directory that match, sorted as

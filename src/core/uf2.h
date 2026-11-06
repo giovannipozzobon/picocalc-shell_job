@@ -34,6 +34,15 @@
 #define UF2_SRAM_END       0x20082000u
 #define UF2_RAM_LOAD_END   0x20080000u
 
+/* A program that takes arguments says so with a record of this size,
+ * aligned to it, so it lies whole in one block's page: two words of magic
+ * and its name, NUL-ended (PICOCALC_SHELL_TAKES_ARGS in
+ * include/picocalc_shell.h; design.md §3.5). */
+#define UF2_ARGS_RECORD 64u
+#define UF2_ARGS_MAGIC0 0x9a3f6c1du
+#define UF2_ARGS_MAGIC1 0x5e8b27f4u
+#define UF2_ARGS_NAME   (UF2_ARGS_RECORD - 8u)
+
 /* The app partition, as the shell sees it. */
 typedef struct {
     uint32_t base;   /* where it is mapped: 0x10000000 */
@@ -67,6 +76,7 @@ typedef struct {
     FRESULT  fr;        /* for UF2_CARD, and a card failure in UF2_WRITE_FAILED */
     uint32_t check_us;  /* how long each pass took, for the caller to fill */
     uint32_t write_us;
+    char     args_name[UF2_ARGS_NAME];  /* the name the program declared, or "" */
 } uf2_info_t;
 
 /* Pass one, from the start of `f`: flash is only read. `stop` is polled

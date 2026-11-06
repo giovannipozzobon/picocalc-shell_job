@@ -42,6 +42,9 @@ bool files_redirect(shell_t *sh, const char *arg, bool append);
 /* After the command: put the file in place, or keep the old one and say
  * why. False if the output was lost. The caller puts sh->out back. */
 bool files_redirect_end(shell_t *sh);
+/* The same for the errors, for `2>`: sh->err goes to it; at the end, back to `was`. */
+bool files_redirect_err(shell_t *sh, const char *arg, bool append);
+bool files_redirect_err_end(shell_t *sh, const out_t *was);
 
 /* `< arg` for the next command: sh->in. */
 bool files_input(shell_t *sh, const char *arg);
@@ -52,11 +55,18 @@ void files_input_end(shell_t *sh);
  * failure with the error printed as "cmd: arg: why". */
 FRESULT files_open_read(shell_t *sh, const char *cmd, const char *arg, FIL *f);
 
+/* The same for an absolute path the shell already holds, not one as typed. */
+FRESULT files_open_path(shell_t *sh, const char *cmd, const char *path, FIL *f);
+
 /* Leading options, such as -l -a or -la, up to "--" or the first
  * operand: each letter of `allowed` found sets its bit in *flags. The
  * index of the first operand, or -1 after printing the usage. */
 int files_options(shell_t *sh, int argc, char **argv, const char *allowed, unsigned *flags,
                   const char *usage);
+
+/* The absolute `path`, each name spelled as the card has it: NULL, or why
+ * not. */
+const char *files_spelled(const char *path, char out[SHELL_PATH_MAX + 1]);
 
 /* Make `path` (absolute, a directory) the current directory, each name
  * spelled as the card has it: NULL, or why not. */
@@ -68,6 +78,9 @@ const char *files_chdir(shell_t *sh, const char *path);
  * in place. */
 extern const char FILES_STOPPED[];
 const char *files_copy(shell_t *sh, const char *src, const char *dst, const char **which);
+/* Read a whole file, to `to`, or to nothing if it is NULL: NULL, why not,
+ * or FILES_STOPPED. */
+const char *files_read_out(shell_t *sh, const char *src, const out_t *to);
 
 /* A walk down the tree under a directory, for the DOS flavour's /S,
  * XCOPY and DELTREE: depth first, in the card's order, one directory
@@ -105,6 +118,8 @@ int cmd_mkdir(shell_t *sh, int argc, char **argv);
 int cmd_mv(shell_t *sh, int argc, char **argv);
 int cmd_pwd(shell_t *sh, int argc, char **argv);
 int cmd_rm(shell_t *sh, int argc, char **argv);
+int cmd_tee(shell_t *sh, int argc, char **argv);
+int cmd_find(shell_t *sh, int argc, char **argv);
 int cmd_rmdir(shell_t *sh, int argc, char **argv);
 int cmd_touch(shell_t *sh, int argc, char **argv);
 

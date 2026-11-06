@@ -54,6 +54,12 @@ static bool name_char(char c) {
     return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
 }
 
+/* A variable's value; $PWD is always where the shell is. */
+static const char *value_of(shell_t *sh, const char *name, size_t len) {
+    if (len == 3 && memcmp(name, "PWD", 3) == 0) return sh->cwd;
+    return vars_get(name, len);
+}
+
 /* `$` at *sp: a variable's value, `$?`, or the `$` itself. */
 static bool dollar(shell_t *sh, const char **sp, const char *end, expand_t *e, word_t *w) {
     const char *s = *sp + 1;
@@ -66,13 +72,13 @@ static bool dollar(shell_t *sh, const char **sp, const char *end, expand_t *e, w
     } else if (s < end && *s == '{') {
         const char *close = memchr(s, '}', (size_t)(end - s));
         if (close && vars_is_name(s + 1, (size_t)(close - s - 1))) {
-            val = vars_get(s + 1, (size_t)(close - s - 1));
+            val = value_of(sh, s + 1, (size_t)(close - s - 1));
             s = close + 1;
         }
     } else {
         const char *name = s;
         while (s < end && name_char(*s)) s++;
-        if (vars_is_name(name, (size_t)(s - name))) val = vars_get(name, (size_t)(s - name));
+        if (vars_is_name(name, (size_t)(s - name))) val = value_of(sh, name, (size_t)(s - name));
         else s = name;
     }
     if (s == *sp + 1) {   /* nothing a variable: the '$' as it is */
@@ -87,6 +93,14 @@ static bool dollar(shell_t *sh, const char **sp, const char *end, expand_t *e, w
 static bool scan(shell_t *sh, const char *raw, size_t len, expand_t *e, word_t *w, bool glob) {
     const char *s = raw, *end = raw + len;
     bool dq = false;
+    /* ~ and ~/ at a word's start, unquoted, are $HOME. */
+    if (len > 0 && raw[0] == '~' && (len == 1 || raw[1] == '/')) {
+        const char *home = vars_get("HOME", 4);
+        if (home) {
+            if (!emit_str(e, w, home)) return false;
+            s++;
+        }
+    }
     while (s < end) {
         char c = *s;
         if (c == '\'' && !dq) {

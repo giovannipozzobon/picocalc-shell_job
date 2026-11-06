@@ -17,7 +17,9 @@ bool dos_other_drive(const char *arg) {
 }
 
 bool dos_resolve(char out[SHELL_PATH_MAX + 1], const char *cwd, const char *arg) {
-    if (dos_other_drive(arg)) return false;
+    /* As typed, only '\\' separates names; '/' starts a switch (§4.7). The
+     * card's own paths, as in cwd, use '/' and do not come through arg. */
+    if (dos_other_drive(arg) || strchr(arg, '/')) return false;
     if (fold(arg[0]) == 'C' && arg[1] == ':') arg += 2;
     char buf[SHELL_PATH_MAX + 1];
     size_t n = strlen(arg);

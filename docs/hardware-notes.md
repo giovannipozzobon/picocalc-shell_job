@@ -1374,7 +1374,19 @@ start of flash, as one copied on in BOOTSEL with no partition table does.
 UF2 Loader's app partition starts after stage3, so a program it started
 reads nonzero. From UF2 Loader 2.5's source (`common/bootloader/
 proginfo.c`, its `flash_size()` example for programs) and the RP2350
-datasheet's address translation; not yet read back on a board.
+datasheet's address translation.
+
+*Read back over SWD on the Plus 2 W, 2026-11-04,* under stage3 2.5 with a program
+in the app partition: `ATRANS0` (`0x400d0034`) reads `0x04000002`, base 2, so the
+partition is at 8 KB. **It survives OpenOCD's `reset halt`,** so a debugger reading
+`0x10000000` then, as `flash read_bank` and `verify_image` do, reads the app partition
+and not flash offset 0. A saved "first 512 KB" looks whole and holds the wrong thing:
+a program, where stage3 is. Write the identity mapping first, `0x04000000`,
+`0x04000400`, `0x04000800` and `0x04000c00` to `0x400d0034`-`0x400d0040`, then
+read. The bank's writes went to the physical offset: with the mapping restored,
+`flash write_image erase` at `0x10000000` and a read back put a stage3 at offset 0 and
+left the partition unchanged. OpenOCD's `program` resets the target itself, so it was
+not used for this.
 
 ---
 
@@ -1632,6 +1644,11 @@ Not yet checked: a Pico 2 (RP2350A) with the W build, and what driving
 its GP23-25 and GP29 does there (the owner has no Pico 2; the Plus 2 is
 the nearest board checked); WPA3-only networks, which the WPA2-AES join
 does not support.
+
+**The power button cannot make a timed power cut.** It is a soft button: pressed, it
+takes over a second to cut the power (the owner, 2026-11-04). A test that needs
+the power gone at a moment shorter than that cannot use it. Over SWD, a hardware breakpoint
+then a reset stops at the exact moment, though the card stays powered.
 
 ### 8.7 A copy of the panel to a Tang Nano 20K, on J703
 

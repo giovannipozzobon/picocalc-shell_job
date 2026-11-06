@@ -66,9 +66,12 @@ typedef struct {
     const uint8_t *data;   /* and its payload */
 } scan_t;
 
-static uint32_t word(unsigned i) {
-    const uint8_t *p = s_blk + 4u * i;
+static uint32_t get_word(const uint8_t *p) {
     return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+}
+
+static uint32_t word(unsigned i) {
+    return get_word(s_blk + 4u * i);
 }
 
 static bool our_family(uint32_t flags, uint32_t family) {
@@ -166,6 +169,21 @@ static bool differs(uint32_t sec) {
     return s_differ[sec / 8] & (1u << (sec % 8));
 }
 
+/* A record saying the program takes arguments, in this block's page, into
+ * `name`. A name that is empty, not ended or not text is no record. */
+static void find_args(const uint8_t *page, char name[UF2_ARGS_NAME]) {
+    for (uint32_t off = 0; off < UF2_PAGE && !name[0]; off += UF2_ARGS_RECORD) {
+        const uint8_t *r = page + off;
+        if (get_word(r) != UF2_ARGS_MAGIC0 || get_word(r + 4) != UF2_ARGS_MAGIC1) continue;
+        const uint8_t *text = r + 8;
+        const uint8_t *end = memchr(text, 0, UF2_ARGS_NAME);
+        if (!end || end == text) continue;
+        bool ok = true;
+        for (const uint8_t *c = text; c < end; c++) ok = ok && *c >= 0x20 && *c != 0x7F;
+        if (ok) memcpy(name, text, (size_t)(end - text) + 1);
+    }
+}
+
 uf2_result_t uf2_check(FIL *f, const uf2_flash_t *flash, uf2_info_t *info,
                        bool (*stop)(void *ctx), void *ctx) {
     memset(info, 0, sizeof *info);
@@ -179,6 +197,7 @@ uf2_result_t uf2_check(FIL *f, const uf2_flash_t *flash, uf2_info_t *info,
     while ((r = scan_next(&sc, &info->fr)) == UF2_FLASH || r == UF2_RAM) {
         if (info->blocks++ == 0) info->lo = sc.addr;
         info->hi = sc.addr + UF2_PAGE;
+        find_args(sc.data, info->args_name);
         if (r == UF2_RAM) continue;
         uint32_t sec = sector_of(flash, sc.addr);
         if (!open || sec != cur) {
